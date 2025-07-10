@@ -4,7 +4,7 @@ import './App.css';
 const recipes = [
   {
     id: 1,
-    name: 'Spaghetti Carbonara',
+    name: 'Spaghettii Carbonara',
     ingredients: [
       '200g spaghetti',
       '100g pancetta',
