@@ -62,6 +62,73 @@ const recipes = [
       'Drizzle with olive oil and sprinkle oregano.',
       'Season and toss gently.'
     ]
+  },
+  {
+    id: 4,
+    name: 'Beef Tacos',
+    ingredients: [
+      '8 small tortillas',
+      '300g ground beef',
+      '1 onion',
+      '2 cloves garlic',
+      '1 tsp chili powder',
+      'Lettuce',
+      'Tomato',
+      'Cheddar cheese',
+      'Sour cream',
+      'Salt',
+      'Pepper'
+    ],
+    instructions: [
+      'Cook onion and garlic until soft.',
+      'Add ground beef and brown.',
+      'Stir in chili powder, salt, and pepper.',
+      'Warm tortillas.',
+      'Fill tortillas with beef, lettuce, tomato, cheese, and sour cream.'
+    ]
+  },
+  {
+    id: 5,
+    name: 'Vegetable Stir Fry',
+    ingredients: [
+      '1 bell pepper',
+      '1 carrot',
+      '100g broccoli',
+      '1 onion',
+      '2 tbsp soy sauce',
+      '1 tbsp olive oil',
+      '1 clove garlic',
+      'Salt',
+      'Pepper'
+    ],
+    instructions: [
+      'Chop all vegetables.',
+      'Heat oil in a wok.',
+      'Add garlic and onion, stir fry for 2 minutes.',
+      'Add remaining vegetables and stir fry until tender.',
+      'Add soy sauce, salt, and pepper. Serve hot.'
+    ]
+  },
+  {
+    id: 6,
+    name: 'Pancakes',
+    ingredients: [
+      '1 cup flour',
+      '2 tbsp sugar',
+      '1 tsp baking powder',
+      '1/2 tsp salt',
+      '1 cup milk',
+      '1 egg',
+      '2 tbsp melted butter',
+      'Butter or oil for cooking'
+    ],
+    instructions: [
+      'Mix dry ingredients in a bowl.',
+      'Whisk in milk, egg, and melted butter.',
+      'Heat a pan and add butter or oil.',
+      'Pour batter to form pancakes and cook until bubbles form.',
+      'Flip and cook until golden. Serve with syrup.'
+    ]
   }
 ];
 
