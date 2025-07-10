@@ -1,39 +1,134 @@
-name: Call Gemini API on PR
+name: Generate PR Documentation with Gemini
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
 
 jobs:
-  call-gemini:
+  generate-docs:
     runs-on: ubuntu-latest
-
+    
+    permissions:
+      contents: read
+      pull-requests: write
+    
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Call Gemini API
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Get PR changes
+        id: changes
+        run: |
+          # Get the diff between base and head
+          git diff ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} > pr_diff.txt
+          
+          # Get changed files list
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | tr '\n' ', ')
+          echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          
+          # Check if diff is too large (Gemini has token limits)
+          DIFF_SIZE=$(wc -c < pr_diff.txt)
+          if [ $DIFF_SIZE -gt 30000 ]; then
+            echo "diff_truncated=true" >> $GITHUB_OUTPUT
+            head -c 25000 pr_diff.txt > pr_diff_truncated.txt
+            echo -e "\n\n[... diff truncated due to size ...]" >> pr_diff_truncated.txt
+            mv pr_diff_truncated.txt pr_diff.txt
+          else
+            echo "diff_truncated=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate documentation with Gemini
+        id: gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          echo "📡 Calling Gemini API..."
+          # Escape the diff content for JSON
+          DIFF_CONTENT=$(cat pr_diff.txt | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          
+          # Prepare the prompt
+          PROMPT="Write documentation for the following code changes in this Pull Request:
 
-          PROMPT="Write a documentation for this PR."
+          Changed files: ${{ steps.changes.outputs.changed_files }}
 
-          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}" \
+          Code diff:
+          \`\`\`
+          $DIFF_CONTENT
+          \`\`\`
+
+          Please provide:
+          1. A summary of what was changed
+          2. Why these changes were made (if apparent from the code)
+          3. Any new features or functionality added
+          4. Breaking changes (if any)
+          5. Usage examples for new features (if applicable)
+
+          Format the response in clear markdown suitable for documentation."
+
+          # Call Gemini API
+          RESPONSE=$(curl -s -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d @- <<EOF
-{
-  "contents": [
-    {
-      "parts": [
-        { "text": "$PROMPT" }
-      ]
-    }
-  ]
-}
-EOF
-)
-
-          echo "🧠 Gemini API Response:"
-          echo "$RESPONSE"
+            -d "{
+              \"contents\": [{
+                \"parts\": [{
+                  \"text\": \"$PROMPT\"
+                }]
+              }]
+            }")
+          
+          # Extract the generated text
+          DOCUMENTATION=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: Could not generate documentation"')
+          
+          # Save to file for the next step
+          echo "$DOCUMENTATION" > generated_docs.md
+          
+          # Set output (escape for GitHub Actions)
+          echo "documentation<<EOF" >> $GITHUB_OUTPUT
+          echo "$DOCUMENTATION" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const documentation = fs.readFileSync('generated_docs.md', 'utf8');
+            
+            const body = `## 📚 Generated Documentation
+            
+            ${documentation}
+            
+            ---
+            *Documentation generated automatically by Gemini AI*
+            ${{ steps.changes.outputs.diff_truncated == 'true' && '\n⚠️ *Note: Large diff was truncated for processing*' || '' }}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+      
+      - name: Handle API errors
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ❌ Documentation Generation Failed
+              
+              There was an error generating documentation for this PR. Please check the workflow logs for details.
+              
+              Common issues:
+              - Invalid or missing GEMINI_API_KEY secret
+              - API rate limits exceeded
+              - Diff too large for processing
+              
+              *You can trigger this workflow again by pushing new commits to the PR.*`
+            });
