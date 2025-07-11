@@ -384,28 +384,6 @@ EOF
               *Analysis generated automatically by Gemini AI*`
             });
       
-      - name: Comment on PR
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const documentation = fs.readFileSync('generated_docs.md', 'utf8');
-            
-            const body = `## 📚 Generated Documentation
-            
-            ${documentation}
-            
-            ---
-            *Documentation generated automatically by Gemini AI*
-            ${{ steps.changes.outputs.diff_truncated == 'true' && '\n⚠️ *Note: Large diff was truncated for processing*' || '' }}`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
-      
       - name: Handle API errors
         if: failure()
         uses: actions/github-script@v7
@@ -429,4 +407,4 @@ EOF
               Please review the changes manually to determine if documentation updates are needed.
               
               *You can trigger this workflow again by pushing new commits to the PR.*`
-            });
+            }); 
