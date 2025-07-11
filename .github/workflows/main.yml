@@ -148,14 +148,17 @@ jobs:
           echo "$ANALYSIS"
           echo "END DEBUG"
           
+          # Clean up the analysis - remove markdown code blocks if present
+          CLEAN_ANALYSIS=$(echo "$ANALYSIS" | sed 's/^```json$//g' | sed 's/^```$//g' | sed '/^$/d')
+          
           # Try to parse the analysis as JSON (since we asked for JSON format)
-          if echo "$ANALYSIS" | jq empty 2>/dev/null; then
+          if echo "$CLEAN_ANALYSIS" | jq empty 2>/dev/null; then
             # It's valid JSON, extract information
-            NEEDS_UPDATE=$(echo "$ANALYSIS" | jq -r '.needs_doc_update // false' 2>/dev/null)
-            CHANGES_SUMMARY=$(echo "$ANALYSIS" | jq -r '.changes_summary // "No summary available"' 2>/dev/null)
+            NEEDS_UPDATE=$(echo "$CLEAN_ANALYSIS" | jq -r '.needs_doc_update // false' 2>/dev/null)
+            CHANGES_SUMMARY=$(echo "$CLEAN_ANALYSIS" | jq -r '.changes_summary // "No summary available"' 2>/dev/null)
             
             # Save analysis to file
-            echo "$ANALYSIS" > analysis.json
+            echo "$CLEAN_ANALYSIS" > analysis.json
           else
             # It's not JSON, treat as plain text analysis
             echo "Warning: Gemini returned plain text instead of JSON"
@@ -181,7 +184,7 @@ jobs:
           
           # Set full analysis output
           echo "analysis<<EOF" >> $GITHUB_OUTPUT
-          echo "$ANALYSIS" >> $GITHUB_OUTPUT
+          echo "$CLEAN_ANALYSIS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
       
       - name: Create documentation PR
