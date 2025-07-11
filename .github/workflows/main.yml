@@ -111,15 +111,65 @@ jobs:
               }]
             }")
           
-          # Extract the generated text and parse JSON
-          ANALYSIS=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: Could not analyze changes"')
+          # Debug: Print the raw response
+          echo "DEBUG - Raw Gemini API Response:"
+          echo "$RESPONSE"
+          echo "END DEBUG"
           
-          # Save analysis to file
-          echo "$ANALYSIS" > analysis.json
+          # Check if RESPONSE is empty
+          if [[ -z "$RESPONSE" ]]; then
+            echo "Error: Gemini API response is empty"
+            exit 1
+          fi
           
-          # Extract key information
-          NEEDS_UPDATE=$(echo "$ANALYSIS" | jq -r '.needs_doc_update // false')
-          CHANGES_SUMMARY=$(echo "$ANALYSIS" | jq -r '.changes_summary // "No summary available"')
+          # Check if response contains error
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown API error"')
+            echo "Error: Gemini API returned error: $ERROR_MSG"
+            exit 1
+          fi
+          
+          # Extract the generated text safely
+          ANALYSIS=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: Could not analyze changes"' 2>/dev/null)
+          
+          # Check if jq parsing failed
+          if [[ $? -ne 0 || -z "$ANALYSIS" || "$ANALYSIS" == "null" ]]; then
+            echo "Error: Could not parse Gemini API response"
+            echo "Response was: $RESPONSE"
+            exit 1
+          fi
+          
+          echo "DEBUG - Extracted Analysis:"
+          echo "$ANALYSIS"
+          echo "END DEBUG"
+          
+          # Try to parse the analysis as JSON (since we asked for JSON format)
+          if echo "$ANALYSIS" | jq empty 2>/dev/null; then
+            # It's valid JSON, extract information
+            NEEDS_UPDATE=$(echo "$ANALYSIS" | jq -r '.needs_doc_update // false' 2>/dev/null)
+            CHANGES_SUMMARY=$(echo "$ANALYSIS" | jq -r '.changes_summary // "No summary available"' 2>/dev/null)
+            
+            # Save analysis to file
+            echo "$ANALYSIS" > analysis.json
+          else
+            # It's not JSON, treat as plain text analysis
+            echo "Warning: Gemini returned plain text instead of JSON"
+            NEEDS_UPDATE="false"
+            CHANGES_SUMMARY="$ANALYSIS"
+            
+            # Create a simple JSON structure for compatibility
+            cat > analysis.json << EOF
+{
+  "needs_doc_update": false,
+  "changes_summary": "$CHANGES_SUMMARY",
+  "documentation_changes": []
+}
+EOF
+          fi
+          
+          # Fallback values if parsing failed
+          NEEDS_UPDATE=${NEEDS_UPDATE:-false}
+          CHANGES_SUMMARY=${CHANGES_SUMMARY:-"Analysis failed"}
           
           echo "needs_update=$NEEDS_UPDATE" >> $GITHUB_OUTPUT
           echo "changes_summary=$CHANGES_SUMMARY" >> $GITHUB_OUTPUT
@@ -137,10 +187,23 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const analysis = JSON.parse(fs.readFileSync('analysis.json', 'utf8'));
             
-            if (!analysis.needs_doc_update || !analysis.documentation_changes) {
-              console.log('No documentation changes needed');
+            // Check if analysis file exists
+            if (!fs.existsSync('analysis.json')) {
+              console.log('Analysis file not found, skipping documentation PR');
+              return;
+            }
+            
+            let analysis;
+            try {
+              analysis = JSON.parse(fs.readFileSync('analysis.json', 'utf8'));
+            } catch (error) {
+              console.log('Error parsing analysis.json:', error.message);
+              return;
+            }
+            
+            if (!analysis.needs_doc_update || !analysis.documentation_changes || analysis.documentation_changes.length === 0) {
+              console.log('No documentation changes needed according to analysis');
               return;
             }
             
@@ -238,7 +301,7 @@ jobs:
               ### Original PR Changes
               - Repository: ${context.repo.repo}
               - PR: #${context.issue.number}
-              - Changed files: ${process.env.CHANGED_FILES}
+              - Changed files: ${{ steps.changes.outputs.changed_files }}
               
               ---
               *This PR was generated automatically. Please review the changes before merging.*`;
