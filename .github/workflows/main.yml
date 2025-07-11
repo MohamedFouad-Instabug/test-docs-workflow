@@ -1,0 +1,410 @@
+name: Generate PR Documentation with Gemini
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  generate-docs:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Get PR changes
+        id: changes
+        run: |
+          # Get the diff between base and head
+          git diff ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} > pr_diff.txt
+          
+          # Get changed files list
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | tr '\n' ', ')
+          echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          
+          # Check if diff is too large (Gemini has token limits)
+          DIFF_SIZE=$(wc -c < pr_diff.txt)
+          if [ $DIFF_SIZE -gt 30000 ]; then
+            echo "diff_truncated=true" >> $GITHUB_OUTPUT
+            head -c 25000 pr_diff.txt > pr_diff_truncated.txt
+            echo -e "\n\n[... diff truncated due to size ...]" >> pr_diff_truncated.txt
+            mv pr_diff_truncated.txt pr_diff.txt
+          else
+            echo "diff_truncated=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Clone documentation repo
+        uses: actions/checkout@v4
+        with:
+          repository: MohamedFouad-Instabug/Docs
+          token: ${{ secrets.DOCS_PAT }}
+          path: docs-repo
+
+      - name: Analyze changes with Gemini
+        id: gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # Escape the diff content for JSON
+          DIFF_CONTENT=$(cat pr_diff.txt | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+          
+          # Get existing documentation structure
+          DOC_STRUCTURE=$(find docs-repo -name "*.md" -type f | head -20 | xargs -I {} basename {} | tr '\n' ', ')
+          
+          # Prepare the enhanced prompt
+          PROMPT="You are analyzing code changes to determine if documentation needs to be updated.
+
+          CONTEXT:
+          - Main code repository: ${{ github.repository }}
+          - Documentation repository: https://github.com/MohamedFouad-Instabug/Docs
+          - Existing documentation files: $DOC_STRUCTURE
+
+          CODE CHANGES:
+          Changed files: ${{ steps.changes.outputs.changed_files }}
+
+          Code diff:
+          \`\`\`
+          $DIFF_CONTENT
+          \`\`\`
+
+          ANALYSIS REQUIRED:
+          1. Do these code changes require documentation updates? (YES/NO)
+          2. If YES, which existing documentation files need to be modified?
+          3. What specific changes are needed in the documentation?
+          4. Are there new features that require entirely new documentation?
+
+          RESPONSE FORMAT:
+          Please respond in this exact JSON format:
+          {
+            \"needs_doc_update\": boolean,
+            \"existing_files_to_update\": [\"filename1.md\", \"filename2.md\"],
+            \"new_files_needed\": [\"newfile1.md\", \"newfile2.md\"],
+            \"changes_summary\": \"Brief summary of what changed\",
+            \"documentation_changes\": [
+              {
+                \"file\": \"filename.md\",
+                \"action\": \"update|create\",
+                \"content\": \"The actual markdown content to add/update\",
+                \"reason\": \"Why this change is needed\"
+              }
+            ]
+          }
+
+          Be thorough but only suggest documentation changes that are truly necessary based on the code changes."
+
+          # Call Gemini API
+          RESPONSE=$(curl -s -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"contents\": [{
+                \"parts\": [{
+                  \"text\": \"$PROMPT\"
+                }]
+              }]
+            }")
+          
+          # Debug: Print the raw response
+          echo "DEBUG - Raw Gemini API Response:"
+          echo "$RESPONSE"
+          echo "END DEBUG"
+          
+          # Check if RESPONSE is empty
+          if [[ -z "$RESPONSE" ]]; then
+            echo "Error: Gemini API response is empty"
+            exit 1
+          fi
+          
+          # Check if response contains error
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown API error"')
+            echo "Error: Gemini API returned error: $ERROR_MSG"
+            exit 1
+          fi
+          
+          # Extract the generated text safely
+          ANALYSIS=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: Could not analyze changes"' 2>/dev/null)
+          
+          # Check if jq parsing failed
+          if [[ $? -ne 0 || -z "$ANALYSIS" || "$ANALYSIS" == "null" ]]; then
+            echo "Error: Could not parse Gemini API response"
+            echo "Response was: $RESPONSE"
+            exit 1
+          fi
+          
+          echo "DEBUG - Extracted Analysis:"
+          echo "$ANALYSIS"
+          echo "END DEBUG"
+          
+          # Try to parse the analysis as JSON (since we asked for JSON format)
+          if echo "$ANALYSIS" | jq empty 2>/dev/null; then
+            # It's valid JSON, extract information
+            NEEDS_UPDATE=$(echo "$ANALYSIS" | jq -r '.needs_doc_update // false' 2>/dev/null)
+            CHANGES_SUMMARY=$(echo "$ANALYSIS" | jq -r '.changes_summary // "No summary available"' 2>/dev/null)
+            
+            # Save analysis to file
+            echo "$ANALYSIS" > analysis.json
+          else
+            # It's not JSON, treat as plain text analysis
+            echo "Warning: Gemini returned plain text instead of JSON"
+            NEEDS_UPDATE="false"
+            CHANGES_SUMMARY="$ANALYSIS"
+            
+            # Create a simple JSON structure for compatibility
+            cat > analysis.json << EOF
+{
+  "needs_doc_update": false,
+  "changes_summary": "$CHANGES_SUMMARY",
+  "documentation_changes": []
+}
+EOF
+          fi
+          
+          # Fallback values if parsing failed
+          NEEDS_UPDATE=${NEEDS_UPDATE:-false}
+          CHANGES_SUMMARY=${CHANGES_SUMMARY:-"Analysis failed"}
+          
+          echo "needs_update=$NEEDS_UPDATE" >> $GITHUB_OUTPUT
+          echo "changes_summary=$CHANGES_SUMMARY" >> $GITHUB_OUTPUT
+          
+          # Set full analysis output
+          echo "analysis<<EOF" >> $GITHUB_OUTPUT
+          echo "$ANALYSIS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Create documentation PR
+        if: steps.gemini.outputs.needs_update == 'true'
+        uses: actions/github-script@v7
+        env:
+          DOCS_PAT: ${{ secrets.DOCS_PAT }}
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Check if analysis file exists
+            if (!fs.existsSync('analysis.json')) {
+              console.log('Analysis file not found, skipping documentation PR');
+              return;
+            }
+            
+            let analysis;
+            try {
+              analysis = JSON.parse(fs.readFileSync('analysis.json', 'utf8'));
+            } catch (error) {
+              console.log('Error parsing analysis.json:', error.message);
+              return;
+            }
+            
+            if (!analysis.needs_doc_update || !analysis.documentation_changes || analysis.documentation_changes.length === 0) {
+              console.log('No documentation changes needed according to analysis');
+              return;
+            }
+            
+            // Create a new branch name
+            const branchName = `auto-update-${context.repo.repo}-pr-${context.issue.number}`;
+            const baseBranch = 'main'; // or 'master' depending on docs repo
+            
+            // Initialize Octokit for docs repo
+            const { Octokit } = require("@octokit/rest");
+            const docsOctokit = new Octokit({
+              auth: process.env.DOCS_PAT
+            });
+            
+            const docsOwner = 'MohamedFouad-Instabug';
+            const docsRepo = 'Docs';
+            
+            try {
+              // Get the base branch ref
+              const baseRef = await docsOctokit.rest.git.getRef({
+                owner: docsOwner,
+                repo: docsRepo,
+                ref: `heads/${baseBranch}`
+              });
+              
+              // Create a new branch
+              await docsOctokit.rest.git.createRef({
+                owner: docsOwner,
+                repo: docsRepo,
+                ref: `refs/heads/${branchName}`,
+                sha: baseRef.data.object.sha
+              });
+              
+              // Apply each documentation change
+              const filesToUpdate = [];
+              
+              for (const change of analysis.documentation_changes) {
+                let fileContent = change.content;
+                let filePath = change.file;
+                
+                // Ensure file has .md extension
+                if (!filePath.endsWith('.md')) {
+                  filePath += '.md';
+                }
+                
+                let fileSha = null;
+                
+                // Check if file exists (for updates)
+                if (change.action === 'update') {
+                  try {
+                    const existingFile = await docsOctokit.rest.repos.getContent({
+                      owner: docsOwner,
+                      repo: docsRepo,
+                      path: filePath,
+                      ref: branchName
+                    });
+                    fileSha = existingFile.data.sha;
+                    
+                    // For updates, prepend to existing content
+                    const existingContent = Buffer.from(existingFile.data.content, 'base64').toString();
+                    fileContent = fileContent + '\n\n' + existingContent;
+                  } catch (error) {
+                    console.log(`File ${filePath} not found, will create new file`);
+                  }
+                }
+                
+                // Create or update the file
+                await docsOctokit.rest.repos.createOrUpdateFileContents({
+                  owner: docsOwner,
+                  repo: docsRepo,
+                  path: filePath,
+                  message: `Update documentation for ${context.repo.repo} PR #${context.issue.number}`,
+                  content: Buffer.from(fileContent).toString('base64'),
+                  branch: branchName,
+                  ...(fileSha && { sha: fileSha })
+                });
+                
+                filesToUpdate.push({
+                  file: filePath,
+                  action: change.action,
+                  reason: change.reason
+                });
+              }
+              
+              // Create pull request in docs repo
+              const prBody = `## Automatic Documentation Update
+              
+              This PR was automatically generated based on changes in [${context.repo.repo}#${context.issue.number}](${context.payload.pull_request.html_url}).
+              
+              ### Changes Summary
+              ${analysis.changes_summary}
+              
+              ### Files Modified
+              ${filesToUpdate.map(f => `- **${f.file}** (${f.action}): ${f.reason}`).join('\n')}
+              
+              ### Original PR Changes
+              - Repository: ${context.repo.repo}
+              - PR: #${context.issue.number}
+              - Changed files: ${{ steps.changes.outputs.changed_files }}
+              
+              ---
+              *This PR was generated automatically. Please review the changes before merging.*`;
+              
+              const docsPR = await docsOctokit.rest.pulls.create({
+                owner: docsOwner,
+                repo: docsRepo,
+                title: `📚 Auto-update docs for ${context.repo.repo} PR #${context.issue.number}`,
+                head: branchName,
+                base: baseBranch,
+                body: prBody
+              });
+              
+              // Comment on original PR about the docs PR
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## 📚 Documentation Update Required
+                
+                Based on the changes in this PR, documentation updates are needed.
+                
+                **Automatic Documentation PR Created**: [${docsOwner}/${docsRepo}#${docsPR.data.number}](${docsPR.data.html_url})
+                
+                ### Changes Summary
+                ${analysis.changes_summary}
+                
+                ### Files that will be updated:
+                ${filesToUpdate.map(f => `- **${f.file}** (${f.action}): ${f.reason}`).join('\n')}
+                
+                Please review and merge the documentation PR after this code PR is merged.
+                
+                ---
+                *Documentation analysis generated automatically by Gemini AI*`
+              });
+              
+            } catch (error) {
+              console.error('Error creating documentation PR:', error);
+              
+              // Comment on original PR about the error
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## ❌ Documentation Update Failed
+                
+                An error occurred while trying to create documentation updates:
+                
+                \`\`\`
+                ${error.message}
+                \`\`\`
+                
+                Please check the workflow logs and ensure:
+                - DOCS_PAT token has write access to the docs repository
+                - The docs repository structure is accessible
+                
+                Manual documentation review may be required.`
+              });
+            }
+      
+      - name: Comment on PR (no docs update needed)
+        if: steps.gemini.outputs.needs_update == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 📚 Documentation Analysis Complete
+              
+              ✅ **No documentation updates needed** for this PR.
+              
+              ### Analysis Summary
+              ${{ steps.gemini.outputs.changes_summary }}
+              
+              The changes in this PR do not require updates to the documentation repository.
+              
+              ---
+              *Analysis generated automatically by Gemini AI*`
+            });
+      
+      - name: Handle API errors
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ❌ Documentation Analysis Failed
+              
+              There was an error analyzing this PR for documentation updates. Please check the workflow logs for details.
+              
+              Common issues:
+              - Invalid or missing GEMINI_API_KEY secret
+              - Invalid or missing DOCS_PAT token
+              - API rate limits exceeded
+              - Diff too large for processing
+              - Network connectivity issues
+              
+              Please review the changes manually to determine if documentation updates are needed.
+              
+              *You can trigger this workflow again by pushing new commits to the PR.*`
+            }); 
