@@ -129,16 +129,121 @@ const recipes = [
       'Pour batter to form pancakes and cook until bubbles form.',
       'Flip and cook until golden. Serve with syrup.'
     ]
+  },
+  // New recipes added below
+  {
+    id: 7,
+    name: 'Caprese Salad',
+    ingredients: [
+      '2 tomatoes',
+      '100g mozzarella',
+      'Fresh basil',
+      'Olive oil',
+      'Salt',
+      'Pepper'
+    ],
+    instructions: [
+      'Slice tomatoes and mozzarella.',
+      'Arrange on a plate with basil leaves.',
+      'Drizzle with olive oil, season with salt and pepper.'
+    ]
+  },
+  {
+    id: 8,
+    name: 'Omelette',
+    ingredients: [
+      '2 eggs',
+      '1 tbsp milk',
+      'Salt',
+      'Pepper',
+      'Butter',
+      'Cheese (optional)',
+      'Ham (optional)'
+    ],
+    instructions: [
+      'Beat eggs with milk, salt, and pepper.',
+      'Melt butter in a pan.',
+      'Pour in eggs and cook gently.',
+      'Add cheese/ham if desired, fold and serve.'
+    ]
+  },
+  {
+    id: 9,
+    name: 'Fruit Smoothie',
+    ingredients: [
+      '1 banana',
+      '1 cup berries',
+      '1 cup yogurt',
+      'Honey',
+      'Ice cubes'
+    ],
+    instructions: [
+      'Combine all ingredients in a blender.',
+      'Blend until smooth.',
+      'Serve chilled.'
+    ]
   }
 ];
 
+// Collect all unique ingredients
+const allIngredients = Array.from(
+  new Set(recipes.flatMap(r => r.ingredients.map(i => i.toLowerCase())))
+).sort();
+
 function App() {
   const [selectedRecipe, setSelectedRecipe] = useState(null);
+  const [selectedIngredients, setSelectedIngredients] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Suggest recipes based on selected ingredients
+  const suggestedRecipes = recipes
+    .map(recipe => {
+      const matched = recipe.ingredients.filter(ing =>
+        selectedIngredients.includes(ing.toLowerCase())
+      ).length;
+      return { ...recipe, matched };
+    })
+    .filter(r => r.matched > 0)
+    .sort((a, b) => b.matched - a.matched);
+
+  const handleIngredientChange = (ingredient) => {
+    setShowSuggestions(false);
+    setSelectedRecipe(null);
+    setSelectedIngredients(prev =>
+      prev.includes(ingredient)
+        ? prev.filter(i => i !== ingredient)
+        : [...prev, ingredient]
+    );
+  };
 
   return (
     <div className="App">
       <header className="App-header">
         <h1>Food Recipes</h1>
+        {!selectedRecipe && (
+          <div className="ingredient-select" style={{marginBottom: '2rem'}}>
+            <h2>Select the ingredients you have:</h2>
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: '0.5rem'}}>
+              {allIngredients.map(ingredient => (
+                <label key={ingredient} style={{marginRight: '1rem'}}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIngredients.includes(ingredient)}
+                    onChange={() => handleIngredientChange(ingredient)}
+                  />
+                  {ingredient}
+                </label>
+              ))}
+            </div>
+            <button
+              style={{marginTop: '1rem'}}
+              onClick={() => setShowSuggestions(true)}
+              disabled={selectedIngredients.length === 0}
+            >
+              Suggest Recipes
+            </button>
+          </div>
+        )}
         {selectedRecipe ? (
           <div className="recipe-detail">
             <button onClick={() => setSelectedRecipe(null)} style={{marginBottom: '1rem'}}>← Back to recipes</button>
@@ -155,6 +260,24 @@ function App() {
                 <li key={idx}>{step}</li>
               ))}
             </ol>
+          </div>
+        ) : showSuggestions && selectedIngredients.length > 0 ? (
+          <div className="recipe-list">
+            <h2>Suggested Recipes:</h2>
+            {suggestedRecipes.length === 0 ? (
+              <p>No recipes match your selected ingredients.</p>
+            ) : (
+              <ul>
+                {suggestedRecipes.map(recipe => (
+                  <li key={recipe.id}>
+                    <button onClick={() => setSelectedRecipe(recipe)}>
+                      {recipe.name} ({recipe.matched} ingredient{recipe.matched > 1 ? 's' : ''} matched)
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button style={{marginTop: '1rem'}} onClick={() => setShowSuggestions(false)}>← Back to ingredient selection</button>
           </div>
         ) : (
           <div className="recipe-list">
