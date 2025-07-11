@@ -99,17 +99,22 @@ jobs:
 
           Be thorough but only suggest documentation changes that are truly necessary based on the code changes."
 
+          # Create JSON payload using jq to ensure proper escaping
+          JSON_PAYLOAD=$(jq -n \
+            --arg prompt "$PROMPT" \
+            '{
+              "contents": [{
+                "parts": [{
+                  "text": $prompt
+                }]
+              }]
+            }')
+
           # Call Gemini API
           RESPONSE=$(curl -s -X POST \
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"contents\": [{
-                \"parts\": [{
-                  \"text\": \"$PROMPT\"
-                }]
-              }]
-            }")
+            -d "$JSON_PAYLOAD")
           
           # Debug: Print the raw response
           echo "DEBUG - Raw Gemini API Response:"
@@ -158,11 +163,13 @@ jobs:
             CHANGES_SUMMARY="$ANALYSIS"
             
             # Create a simple JSON structure for compatibility
-            echo '{
-              "needs_doc_update": false,
-              "changes_summary": "'$CHANGES_SUMMARY'",
-              "documentation_changes": []
-            }' > analysis.json
+            jq -n \
+              --arg summary "$CHANGES_SUMMARY" \
+              '{
+                "needs_doc_update": false,
+                "changes_summary": $summary,
+                "documentation_changes": []
+              }' > analysis.json
           fi
           
           # Fallback values if parsing failed
