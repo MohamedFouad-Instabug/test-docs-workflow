@@ -158,13 +158,11 @@ jobs:
             CHANGES_SUMMARY="$ANALYSIS"
             
             # Create a simple JSON structure for compatibility
-            cat > analysis.json << EOF
-{
-  "needs_doc_update": false,
-  "changes_summary": "$CHANGES_SUMMARY",
-  "documentation_changes": []
-}
-EOF
+            echo '{
+              "needs_doc_update": false,
+              "changes_summary": "'$CHANGES_SUMMARY'",
+              "documentation_changes": []
+            }' > analysis.json
           fi
           
           # Fallback values if parsing failed
@@ -208,7 +206,7 @@ EOF
             }
             
             // Create a new branch name
-            const branchName = `auto-update-${context.repo.repo}-pr-${context.issue.number}`;
+            const branchName = \`auto-update-${context.repo.repo}-pr-${context.issue.number}\`;
             const baseBranch = 'main'; // or 'master' depending on docs repo
             
             // Initialize Octokit for docs repo
@@ -225,14 +223,14 @@ EOF
               const baseRef = await docsOctokit.rest.git.getRef({
                 owner: docsOwner,
                 repo: docsRepo,
-                ref: `heads/${baseBranch}`
+                ref: \`heads/${baseBranch}\`
               });
               
               // Create a new branch
               await docsOctokit.rest.git.createRef({
                 owner: docsOwner,
                 repo: docsRepo,
-                ref: `refs/heads/${branchName}`,
+                ref: \`refs/heads/${branchName}\`,
                 sha: baseRef.data.object.sha
               });
               
@@ -265,7 +263,7 @@ EOF
                     const existingContent = Buffer.from(existingFile.data.content, 'base64').toString();
                     fileContent = fileContent + '\n\n' + existingContent;
                   } catch (error) {
-                    console.log(`File ${filePath} not found, will create new file`);
+                    console.log(\`File ${filePath} not found, will create new file\`);
                   }
                 }
                 
@@ -274,7 +272,7 @@ EOF
                   owner: docsOwner,
                   repo: docsRepo,
                   path: filePath,
-                  message: `Update documentation for ${context.repo.repo} PR #${context.issue.number}`,
+                  message: \`Update documentation for ${context.repo.repo} PR #${context.issue.number}\`,
                   content: Buffer.from(fileContent).toString('base64'),
                   branch: branchName,
                   ...(fileSha && { sha: fileSha })
@@ -288,7 +286,7 @@ EOF
               }
               
               // Create pull request in docs repo
-              const prBody = `## Automatic Documentation Update
+              const prBody = \`## Automatic Documentation Update
               
               This PR was automatically generated based on changes in [${context.repo.repo}#${context.issue.number}](${context.payload.pull_request.html_url}).
               
@@ -296,7 +294,7 @@ EOF
               ${analysis.changes_summary}
               
               ### Files Modified
-              ${filesToUpdate.map(f => `- **${f.file}** (${f.action}): ${f.reason}`).join('\n')}
+              ${filesToUpdate.map(f => \`- **${f.file}** (${f.action}): ${f.reason}\`).join('\\n')}
               
               ### Original PR Changes
               - Repository: ${context.repo.repo}
@@ -304,12 +302,12 @@ EOF
               - Changed files: ${{ steps.changes.outputs.changed_files }}
               
               ---
-              *This PR was generated automatically. Please review the changes before merging.*`;
+              *This PR was generated automatically. Please review the changes before merging.*\`;
               
               const docsPR = await docsOctokit.rest.pulls.create({
                 owner: docsOwner,
                 repo: docsRepo,
-                title: `📚 Auto-update docs for ${context.repo.repo} PR #${context.issue.number}`,
+                title: \`📚 Auto-update docs for ${context.repo.repo} PR #${context.issue.number}\`,
                 head: branchName,
                 base: baseBranch,
                 body: prBody
@@ -320,7 +318,7 @@ EOF
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: `## 📚 Documentation Update Required
+                body: \`## 📚 Documentation Update Required
                 
                 Based on the changes in this PR, documentation updates are needed.
                 
@@ -330,12 +328,12 @@ EOF
                 ${analysis.changes_summary}
                 
                 ### Files that will be updated:
-                ${filesToUpdate.map(f => `- **${f.file}** (${f.action}): ${f.reason}`).join('\n')}
+                ${filesToUpdate.map(f => \`- **${f.file}** (${f.action}): ${f.reason}\`).join('\\n')}
                 
                 Please review and merge the documentation PR after this code PR is merged.
                 
                 ---
-                *Documentation analysis generated automatically by Gemini AI*`
+                *Documentation analysis generated automatically by Gemini AI*\`
               });
               
             } catch (error) {
@@ -346,7 +344,7 @@ EOF
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: `## ❌ Documentation Update Failed
+                body: \`## ❌ Documentation Update Failed
                 
                 An error occurred while trying to create documentation updates:
                 
@@ -358,7 +356,7 @@ EOF
                 - DOCS_PAT token has write access to the docs repository
                 - The docs repository structure is accessible
                 
-                Manual documentation review may be required.`
+                Manual documentation review may be required.\`
               });
             }
       
