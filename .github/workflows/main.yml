@@ -379,7 +379,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## 📚 Documentation Analysis Complete
+              body: \`## 📚 Documentation Analysis Complete
               
               ✅ **No documentation updates needed** for this PR.
               
@@ -389,7 +389,7 @@ jobs:
               The changes in this PR do not require updates to the documentation repository.
               
               ---
-              *Analysis generated automatically by Gemini AI*`
+              *Analysis generated automatically by Gemini AI*\`
             });
       
       - name: Handle API errors
@@ -401,7 +401,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## ❌ Documentation Analysis Failed
+              body: \`## ❌ Documentation Analysis Failed
               
               There was an error analyzing this PR for documentation updates. Please check the workflow logs for details.
               
@@ -414,5 +414,5 @@ jobs:
               
               Please review the changes manually to determine if documentation updates are needed.
               
-              *You can trigger this workflow again by pushing new commits to the PR.*`
+              *You can trigger this workflow again by pushing new commits to the PR.*\`
             }); 
