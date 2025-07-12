@@ -19,7 +19,7 @@ const recipes = [
       'Fry the pancffetta until crisp.',
       'Beat the eggs and mix with the cheeses.',
       'Drain the pasta and mix with pancetta and egg-cheese mixture off the heat.',
-      'Season with black pepper and serve.'
+      'Season with blaxck pepper and serve.'
     ]
   },
   {
