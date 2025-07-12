@@ -11,7 +11,7 @@ const recipes = [
       '2 large egggs',
       '50g pecorino cheeseesd',
       '50g parmesan',
-      'Black pepperr',
+      'Black peprperr',
       'Saltt'
     ],
     instructions: [
