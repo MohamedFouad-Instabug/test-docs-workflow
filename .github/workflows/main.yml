@@ -1,4 +1,4 @@
-name: Analyze PR Changes and Update Docs Repository
+name: Analyze PR Changes and Generate Docs with Gemini AI
 
 on:
   pull_request:
@@ -20,80 +20,243 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Analyze PR changes
-        id: analyze-changes
+      - name: Extract PR information
+        id: extract-pr-info
         run: |
-          echo "Analyzing PR changes..."
+          echo "📋 Extracting PR information..."
           
-          # Get the list of changed files
+          # Get PR details
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body || '' }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          
+          # Get changed files
           CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
-          echo "Changed files:"
-          echo "$CHANGED_FILES"
           
-          # Check if any relevant files were changed
-          RELEVANT_CHANGES=false
+          # Get the diff (limit to 10000 characters to avoid token issues)
+          DIFF_CONTENT=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | head -c 10000)
+          
+          echo "PR Title: $PR_TITLE"
+          echo "PR Number: $PR_NUMBER"
+          echo "Changed files count: $(echo "$CHANGED_FILES" | wc -l)"
+          
+          # Store in outputs
+          echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "pr_body=$PR_BODY" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "diff_content=$DIFF_CONTENT" >> $GITHUB_OUTPUT
+          
+          echo "✅ PR information extracted successfully"
+      
+      - name: Clone documentation repository
+        id: clone-docs
+        run: |
+          echo "📚 Cloning documentation repository..."
+          
+          # Clone the docs repo
+          git clone https://x-access-token:${{ secrets.DOCS_PAT }}@github.com/MohamedFouad-Instabug/Docs.git docs-repo
+          cd docs-repo
+          
+          # Get list of markdown files (limit to 20)
+          MD_FILES=$(find . -name "*.md" -type f | head -20)
+          
+          # Get file structure
+          FILE_STRUCTURE=$(find . -type f -name "*.md" | head -20 | sed 's|^\./||')
+          
+          echo "Found markdown files:"
+          echo "$FILE_STRUCTURE"
+          
+          # Store in outputs
+          echo "md_files=$MD_FILES" >> $GITHUB_OUTPUT
+          echo "file_structure=$FILE_STRUCTURE" >> $GITHUB_OUTPUT
+          
+          echo "✅ Documentation repository cloned successfully"
+      
+      - name: Match files and extract content
+        id: match-files
+        run: |
+          echo "🔍 Matching changed files to documentation..."
+          
+          cd docs-repo
+          
+          # Get the changed files from previous step
+          CHANGED_FILES="${{ steps.extract-pr-info.outputs.changed_files }}"
+          PR_TITLE="${{ steps.extract-pr-info.outputs.pr_title }}"
+          
+          # Initialize variables
+          MATCHED_FILES=""
+          MATCHED_CONTENT=""
           
           # Process each changed file
           while IFS= read -r file; do
             if [[ -n "$file" ]]; then
               echo "Analyzing file: $file"
               
-              # Check if it's a source code file that might need documentation
-              if [[ "$file" =~ \.(js|jsx|ts|tsx|py|java|cpp|c|cs|php|rb|go|rs)$ ]]; then
-                RELEVANT_CHANGES=true
-                echo "Source code file detected: $file"
+              # Extract filename without extension
+              FILENAME=$(basename "$file" | sed 's/\.[^.]*$//')
+              DIRNAME=$(dirname "$file")
+              
+              # Look for matching documentation files
+              POTENTIAL_MATCHES=""
+              
+              # 1. Direct filename match
+              if find . -name "${FILENAME}.md" -type f | grep -q .; then
+                POTENTIAL_MATCHES="$POTENTIAL_MATCHES $(find . -name "${FILENAME}.md" -type f)"
               fi
               
-              # Check if it's a configuration file
-              if [[ "$file" =~ \.(json|yaml|yml|toml|ini|cfg|conf)$ ]]; then
-                RELEVANT_CHANGES=true
-                echo "Configuration file detected: $file"
+              # 2. Directory name match
+              if [[ "$DIRNAME" != "." ]] && find . -path "*/${DIRNAME}/*.md" -type f | grep -q .; then
+                POTENTIAL_MATCHES="$POTENTIAL_MATCHES $(find . -path "*/${DIRNAME}/*.md" -type f | head -3)"
+              fi
+              
+              # 3. PR title keyword match
+              TITLE_KEYWORDS=$(echo "$PR_TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '\n' | grep -E '^[a-z]{3,}$' | head -5)
+              for keyword in $TITLE_KEYWORDS; do
+                if find . -name "*.md" -type f -exec grep -l "$keyword" {} \; | grep -q .; then
+                  POTENTIAL_MATCHES="$POTENTIAL_MATCHES $(find . -name "*.md" -type f -exec grep -l "$keyword" {} \; | head -2)"
+                fi
+              done
+              
+              # Add matched files to our list
+              if [[ -n "$POTENTIAL_MATCHES" ]]; then
+                MATCHED_FILES="$MATCHED_FILES $POTENTIAL_MATCHES"
+                
+                # Extract content from matched files (limit each file to 2000 chars)
+                for match in $POTENTIAL_MATCHES; do
+                  if [[ -f "$match" ]]; then
+                    CONTENT=$(head -c 2000 "$match")
+                    MATCHED_CONTENT="$MATCHED_CONTENT\n\n--- File: $match ---\n$CONTENT"
+                  fi
+                done
               fi
             fi
           done <<< "$CHANGED_FILES"
           
-          echo "relevant_changes=$RELEVANT_CHANGES" >> $GITHUB_OUTPUT
+          # Limit total content to 15000 characters
+          MATCHED_CONTENT=$(echo -e "$MATCHED_CONTENT" | head -c 15000)
           
-          echo "Analysis complete:"
-          echo "- Relevant changes: $RELEVANT_CHANGES"
+          echo "Matched files: $MATCHED_FILES"
+          echo "Content length: ${#MATCHED_CONTENT} characters"
+          
+          # Store in outputs
+          echo "matched_files=$MATCHED_FILES" >> $GITHUB_OUTPUT
+          echo "matched_content=$MATCHED_CONTENT" >> $GITHUB_OUTPUT
+          
+          echo "✅ File matching completed"
+      
+      - name: Generate documentation with Gemini AI
+        id: gemini-analysis
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          echo "🧠 Analyzing with Gemini AI..."
+          
+          # Prepare the prompt for Gemini
+          PR_TITLE="${{ steps.extract-pr-info.outputs.pr_title }}"
+          PR_BODY="${{ steps.extract-pr-info.outputs.pr_body }}"
+          PR_NUMBER="${{ steps.extract-pr-info.outputs.pr_number }}"
+          PR_URL="${{ steps.extract-pr-info.outputs.pr_url }}"
+          CHANGED_FILES="${{ steps.extract-pr-info.outputs.changed_files }}"
+          DIFF_CONTENT="${{ steps.extract-pr-info.outputs.diff_content }}"
+          FILE_STRUCTURE="${{ steps.clone-docs.outputs.file_structure }}"
+          MATCHED_FILES="${{ steps.match-files.outputs.matched_files }}"
+          MATCHED_CONTENT="${{ steps.match-files.outputs.matched_content }}"
+          
+          # Escape content for JSON
+          PR_TITLE_ESCAPED=$(echo "$PR_TITLE" | jq -Rs .)
+          PR_BODY_ESCAPED=$(echo "$PR_BODY" | jq -Rs .)
+          CHANGED_FILES_ESCAPED=$(echo "$CHANGED_FILES" | jq -Rs .)
+          DIFF_CONTENT_ESCAPED=$(echo "$DIFF_CONTENT" | jq -Rs .)
+          FILE_STRUCTURE_ESCAPED=$(echo "$FILE_STRUCTURE" | jq -Rs .)
+          MATCHED_FILES_ESCAPED=$(echo "$MATCHED_FILES" | jq -Rs .)
+          MATCHED_CONTENT_ESCAPED=$(echo "$MATCHED_CONTENT" | jq -Rs .)
+          
+          # Construct the prompt
+          PROMPT="You are an expert documentation analyst. Analyze this pull request and determine if documentation updates are needed. PR Information: - Title: $PR_TITLE - Number: $PR_NUMBER - URL: $PR_URL - Body: $PR_BODY Changed Files: $CHANGED_FILES Diff Content: $DIFF_CONTENT Existing Documentation Structure: $FILE_STRUCTURE Matched Documentation Files: $MATCHED_FILES Matched Documentation Content: $MATCHED_CONTENT Please analyze this information and respond with a JSON object containing: { \"needs_doc_update\": true/false, \"reason\": \"explanation of why docs need updating or not\", \"files_to_update\": [\"list of existing files to update\"], \"files_to_create\": [\"list of new files to create\"], \"suggested_content\": { \"filename.md\": \"content for this file\", \"another-file.md\": \"content for another file\" }, \"update_summary\": \"brief summary of what documentation changes are needed\" } Focus on: - Architectural changes that affect system design - Business logic changes that affect user workflows - API changes that need documentation - Configuration changes that need guides - New features that need user documentation Be concise but thorough. If no documentation is needed, set needs_doc_update to false and explain why."
+          
+          echo "Sending prompt to Gemini AI..."
+          
+          # Call Gemini API
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"contents\": [
+                {
+                  \"parts\": [
+                    { \"text\": $(echo "$PROMPT" | jq -Rs .) }
+                  ]
+                }
+              ]
+            }")
+          
+          echo "Gemini Response:"
+          echo "$RESPONSE"
+          
+          # Extract the text content from response
+          GEMINI_TEXT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text' 2>/dev/null || echo "")
+          
+          if [[ -n "$GEMINI_TEXT" ]]; then
+            echo "Gemini Analysis:"
+            echo "$GEMINI_TEXT"
+            
+            # Try to extract JSON from the response
+            JSON_RESPONSE=$(echo "$GEMINI_TEXT" | grep -o '{.*}' | head -1 || echo "")
+            
+            if [[ -n "$JSON_RESPONSE" ]]; then
+              # Parse the JSON response
+              NEEDS_UPDATE=$(echo "$JSON_RESPONSE" | jq -r '.needs_doc_update' 2>/dev/null || echo "false")
+              REASON=$(echo "$JSON_RESPONSE" | jq -r '.reason' 2>/dev/null || echo "Unable to parse reason")
+              FILES_TO_UPDATE=$(echo "$JSON_RESPONSE" | jq -r '.files_to_update[]?' 2>/dev/null || echo "")
+              FILES_TO_CREATE=$(echo "$JSON_RESPONSE" | jq -r '.files_to_create[]?' 2>/dev/null || echo "")
+              UPDATE_SUMMARY=$(echo "$JSON_RESPONSE" | jq -r '.update_summary' 2>/dev/null || echo "Unable to parse summary")
+              
+              echo "needs_update=$NEEDS_UPDATE" >> $GITHUB_OUTPUT
+              echo "reason=$REASON" >> $GITHUB_OUTPUT
+              echo "files_to_update=$FILES_TO_UPDATE" >> $GITHUB_OUTPUT
+              echo "files_to_create=$FILES_TO_CREATE" >> $GITHUB_OUTPUT
+              echo "update_summary=$UPDATE_SUMMARY" >> $GITHUB_OUTPUT
+              echo "gemini_response=$GEMINI_TEXT" >> $GITHUB_OUTPUT
+              
+              echo "✅ Gemini analysis completed successfully"
+            else
+              echo "❌ Could not extract JSON from Gemini response"
+              echo "needs_update=false" >> $GITHUB_OUTPUT
+              echo "reason=Failed to parse Gemini response" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ No response from Gemini API"
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+            echo "reason=No response from Gemini API" >> $GITHUB_OUTPUT
+          fi
       
       - name: Create documentation PR
         id: create-docs-pr
-        if: steps.analyze-changes.outputs.relevant_changes == 'true'
+        if: steps.gemini-analysis.outputs.needs_update == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.DOCS_PAT }}
           script: |
             try {
-              console.log('Creating documentation PR...');
+              console.log('📝 Creating documentation PR based on Gemini analysis...');
               
-              // Get PR details
               const prNumber = context.issue.number;
               const prTitle = context.payload.pull_request.title;
-              const prBody = context.payload.pull_request.body || '';
               const prUrl = context.payload.pull_request.html_url;
+              const reason = '${{ steps.gemini-analysis.outputs.reason }}';
+              const updateSummary = '${{ steps.gemini-analysis.outputs.update_summary }}';
+              const geminiResponse = '${{ steps.gemini-analysis.outputs.gemini_response }}';
               
-              console.log('PR details:', { prNumber, prTitle, prUrl });
+              // Parse files to update/create from the outputs
+              const filesToUpdate = '${{ steps.gemini-analysis.outputs.files_to_update }}'.split('\n').filter(f => f.trim());
+              const filesToCreate = '${{ steps.gemini-analysis.outputs.files_to_create }}'.split('\n').filter(f => f.trim());
               
-              // Determine documentation type based on PR title
-              let docsTitle = '';
-              let docsContent = '';
+              console.log('Files to update:', filesToUpdate);
+              console.log('Files to create:', filesToCreate);
               
-              if (prTitle.toLowerCase().includes('feature') || prTitle.toLowerCase().includes('add') || prTitle.toLowerCase().includes('new')) {
-                docsTitle = 'Documentation: New Feature - ' + prTitle;
-                docsContent = '# New Feature Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Made\n' + prBody + '\n\n## Implementation Details\n- PR Link: [' + prTitle + '](' + prUrl + ')\n- Repository: ' + context.repo.owner + '/' + context.repo.repo + '\n- Branch: ' + context.payload.pull_request.head.ref + '\n\n## Related Documentation\n- API documentation may need updates\n- User guides may need updates\n- Configuration examples may need updates\n\n## Next Steps\n1. Review the implementation details\n2. Update relevant documentation sections\n3. Add usage examples if applicable\n4. Update any configuration guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              } else if (prTitle.toLowerCase().includes('fix') || prTitle.toLowerCase().includes('bug') || prTitle.toLowerCase().includes('issue')) {
-                docsTitle = 'Documentation: Bug Fix - ' + prTitle;
-                docsContent = '# Bug Fix Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Issue Fixed\n' + prBody + '\n\n## Changes Made\n- Bug fix implementation\n- Updated error handling\n- Improved reliability\n\n## Impact\n- Users should be aware of the fix\n- No breaking changes expected\n- Improved stability\n\n## Related Documentation\n- Update troubleshooting guides if applicable\n- Update known issues section\n- Update changelog\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              } else if (prTitle.toLowerCase().includes('config') || prTitle.toLowerCase().includes('setting')) {
-                docsTitle = 'Documentation: Configuration Update - ' + prTitle;
-                docsContent = '# Configuration Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Configuration Changes\n' + prBody + '\n\n## New Configuration Options\n- Review and document new settings\n- Update configuration examples\n- Update deployment guides\n\n## Migration Guide\n- Document any breaking changes\n- Provide migration steps if needed\n- Update version compatibility notes\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              } else {
-                docsTitle = 'Documentation: General Update - ' + prTitle;
-                docsContent = '# General Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Summary\n' + prBody + '\n\n## Documentation Impact\n- Review existing documentation\n- Update relevant sections\n- Add examples if needed\n\n## Areas to Review\n- API documentation\n- User guides\n- Configuration guides\n- Troubleshooting guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              }
-              
-              // Create a new branch name
+              // Create branch name
               const branchName = 'docs-update-' + Date.now();
               const docsOwner = 'MohamedFouad-Instabug';
               const docsRepo = 'Docs';
@@ -103,17 +266,13 @@ jobs:
               console.log('Branch name:', branchName);
               
               // Get the base branch ref
-              console.log('Getting base branch ref...');
               const baseRef = await github.rest.git.getRef({
                 owner: docsOwner,
                 repo: docsRepo,
                 ref: 'heads/' + baseBranch
               });
               
-              console.log('Base ref obtained:', baseRef.data.object.sha);
-              
               // Create a new branch
-              console.log('Creating new branch:', branchName);
               await github.rest.git.createRef({
                 owner: docsOwner,
                 repo: docsRepo,
@@ -123,38 +282,43 @@ jobs:
               
               console.log('Branch created successfully');
               
-              // Create documentation file
-              console.log('Creating documentation file...');
+              // Create or update files based on Gemini's suggestions
+              const filesChanged = [];
+              
+              // For now, create a summary documentation file
               const fileName = 'updates/' + new Date().toISOString().split('T')[0] + '-pr-' + context.issue.number + '.md';
+              
+                             const docsContent = '# Documentation Update - PR #' + prNumber + '\n\n## Overview\nThis documentation update was generated by Gemini AI based on changes in [PR #' + prNumber + '](' + prUrl + ').\n\n## Analysis Results\n- **Reason for Update**: ' + reason + '\n- **Update Summary**: ' + updateSummary + '\n\n## Files Identified for Update\n' + (filesToUpdate.length > 0 ? filesToUpdate.map(f => '- ' + f).join('\n') : '- None specified') + '\n\n## Files Identified for Creation\n' + (filesToCreate.length > 0 ? filesToCreate.map(f => '- ' + f).join('\n') : '- None specified') + '\n\n## Gemini AI Analysis\n```\n' + geminiResponse + '\n```\n\n## Next Steps\n1. Review the AI-generated analysis\n2. Update the identified documentation files\n3. Create new documentation files as needed\n4. Ensure all changes are properly documented\n\n---\n*This documentation was automatically generated by the GitHub Actions workflow using Gemini AI.*';
               
               await github.rest.repos.createOrUpdateFileContents({
                 owner: docsOwner,
                 repo: docsRepo,
                 path: fileName,
-                message: 'Add documentation update based on PR changes',
+                message: 'Add AI-generated documentation update based on PR analysis',
                 content: Buffer.from(docsContent).toString('base64'),
                 branch: branchName
               });
               
-              console.log('Documentation file created successfully');
+              filesChanged.push(fileName);
+              console.log('Documentation file created:', fileName);
               
               // Create pull request in docs repo
-              console.log('Creating pull request...');
-              const prBody = '## Documentation Update\n\nThis PR was automatically generated based on changes in [PR #' + context.issue.number + '](' + context.payload.pull_request.html_url + ') in the ' + context.repo.owner + '/' + context.repo.repo + ' repository.\n\n### Changes Made\n- Added documentation for the changes in the source PR\n- Generated based on PR title and description\n- Includes implementation details and next steps\n\n### Files Added\n- ' + fileName + ': Documentation update file\n\n### Next Steps\n1. Review the generated documentation\n2. Update any specific sections as needed\n3. Add more detailed examples if required\n4. Merge when ready\n\n---\n*This PR was automatically generated by the GitHub Actions workflow.*';
+                             const docsPRTitle = 'Documentation Update - PR #' + prNumber + ': ' + prTitle;
+               const docsPRBody = '## AI-Generated Documentation Update\n\nThis PR was automatically generated by Gemini AI based on changes in [PR #' + prNumber + '](' + prUrl + ') in the ' + context.repo.owner + '/' + context.repo.repo + ' repository.\n\n### AI Analysis Results\n- **Reason**: ' + reason + '\n- **Summary**: ' + updateSummary + '\n\n### Files Changed\n' + filesChanged.map(f => '- ' + f).join('\n') + '\n\n### What the AI Found\nThe AI analyzed the PR changes and determined that documentation updates are needed. The analysis included:\n- PR title and description\n- Changed files and their diffs\n- Existing documentation structure\n- Matched documentation files\n\n### Next Steps\n1. Review the AI-generated analysis\n2. Update the identified documentation files\n3. Create new documentation files as needed\n4. Ensure all changes are properly documented\n\n---\n*This PR was automatically generated by the GitHub Actions workflow using Gemini AI.*';
               
               const docsPR = await github.rest.pulls.create({
                 owner: docsOwner,
                 repo: docsRepo,
-                title: docsTitle,
+                title: docsPRTitle,
                 head: branchName,
                 base: baseBranch,
-                body: prBody
+                body: docsPRBody
               });
               
               console.log('PR created successfully:', docsPR.data.number);
               
               // Comment on original PR about the docs PR
-              const commentBody = '## Documentation Update Created ✅\n\nI have analyzed your PR changes and created a documentation update in the Docs repository.\n\n### Documentation PR Created\n- Repository: [' + docsOwner + '/' + docsRepo + '](' + docsPR.data.html_url + ')\n- PR Number: #' + docsPR.data.number + '\n- Title: ' + docsTitle + '\n- File Added: ' + fileName + '\n\n### What was analyzed\n- PR title and description\n- Type of changes (feature, bug fix, configuration, etc.)\n- Impact on documentation\n\n### Next Steps\n1. Review the generated documentation PR\n2. Make any necessary adjustments\n3. Merge the documentation PR when ready\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*';
+                             const commentBody = '## AI-Generated Documentation Update Created ✅\n\nI have analyzed your PR changes using Gemini AI and created a documentation update in the Docs repository.\n\n### Documentation PR Created\n- Repository: [' + docsOwner + '/' + docsRepo + '](' + docsPR.data.html_url + ')\n- PR Number: #' + docsPR.data.number + '\n- Title: ' + docsPRTitle + '\n\n### AI Analysis Results\n- **Reason**: ' + reason + '\n- **Summary**: ' + updateSummary + '\n\n### What the AI Analyzed\n- PR title and description\n- Changed files and their diffs\n- Existing documentation structure\n- Matched documentation files\n\n### Files Identified\n- **To Update**: ' + (filesToUpdate.length > 0 ? filesToUpdate.join(', ') : 'None specified') + '\n- **To Create**: ' + (filesToCreate.length > 0 ? filesToCreate.join(', ') : 'None specified') + '\n\n### Next Steps\n1. Review the AI-generated analysis in the Docs PR\n2. Update the identified documentation files\n3. Create new documentation files as needed\n4. Merge the documentation PR when ready\n\n---\n*This comment was automatically generated by the GitHub Actions workflow using Gemini AI.*';
               
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
@@ -168,7 +332,7 @@ jobs:
               console.error('Error details:', error.response?.data);
               
               // Comment on original PR about the error
-              const errorBody = '## Documentation Update Failed ❌\n\nI encountered an error while trying to create a documentation update for your PR.\n\n### Error Details\n- Error: ' + error.message + '\n- Details: ' + JSON.stringify(error.response?.data || {}) + '\n\n### What happened\nThe workflow tried to analyze your PR changes and create a documentation update in the Docs repository, but encountered an issue.\n\n### Next Steps\n1. Check if the Docs repository is accessible\n2. Verify the DOCS_PAT secret is properly configured\n3. Review the workflow logs for more details\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*';
+                             const errorBody = '## Documentation Update Failed ❌\n\nI encountered an error while trying to create a documentation update for your PR.\n\n### Error Details\n- Error: ' + error.message + '\n- Details: ' + JSON.stringify(error.response?.data || {}) + '\n\n### What happened\nThe workflow analyzed your PR changes with Gemini AI and determined documentation updates were needed, but encountered an issue while creating the PR in the Docs repository.\n\n### Next Steps\n1. Check if the Docs repository is accessible\n2. Verify the DOCS_PAT secret is properly configured\n3. Review the workflow logs for more details\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*';
               
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
@@ -179,7 +343,18 @@ jobs:
             }
       
       - name: No documentation needed
-        if: steps.analyze-changes.outputs.relevant_changes == 'false'
-        run: |
-          echo "No relevant changes detected that require documentation updates."
-          echo "This PR doesn't contain source code or configuration changes that would need documentation." 
+        if: steps.gemini-analysis.outputs.needs_update == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const reason = '${{ steps.gemini-analysis.outputs.reason }}';
+            
+                         const commentBody = '## Documentation Analysis Complete ✅\n\nI have analyzed your PR changes using Gemini AI and determined that **no documentation updates are needed**.\n\n### AI Analysis Results\n- **Reason**: ' + reason + '\n\n### What the AI Analyzed\n- PR title and description\n- Changed files and their diffs\n- Existing documentation structure\n- Matched documentation files\n\n### Conclusion\nThe AI determined that the changes in this PR do not require updates to the documentation repository. This could be because:\n- The changes are internal/technical and don\'t affect user-facing documentation\n- The changes are already well-documented\n- The changes don\'t introduce new features or APIs that need documentation\n\n---\n*This analysis was automatically generated by the GitHub Actions workflow using Gemini AI.*';
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody
+            }); 
