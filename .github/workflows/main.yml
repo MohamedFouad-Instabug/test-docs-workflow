@@ -25,54 +25,58 @@ jobs:
           DOCS_PAT: ${{ secrets.DOCS_PAT }}
         with:
           script: |
-            const { Octokit } = require("@octokit/rest");
-            
-            // Initialize Octokit for docs repo
-            const docsOctokit = new Octokit({
-              auth: process.env.DOCS_PAT
-            });
-            
-            const docsOwner = 'MohamedFouad-Instabug';
-            const docsRepo = 'Docs';
-            const baseBranch = 'main';
-            
             try {
               // Create a new branch name
               const branchName = 'test-pr-' + Date.now();
+              const docsOwner = 'MohamedFouad-Instabug';
+              const docsRepo = 'Docs';
+              const baseBranch = 'main';
               
               // Get the base branch ref
-              const baseRef = await docsOctokit.rest.git.getRef({
+              const baseRef = await github.rest.git.getRef({
                 owner: docsOwner,
                 repo: docsRepo,
-                ref: 'heads/' + baseBranch
+                ref: 'heads/' + baseBranch,
+                headers: {
+                  authorization: 'token ' + process.env.DOCS_PAT
+                }
               });
               
               // Create a new branch
-              await docsOctokit.rest.git.createRef({
+              await github.rest.git.createRef({
                 owner: docsOwner,
                 repo: docsRepo,
                 ref: 'refs/heads/' + branchName,
-                sha: baseRef.data.object.sha
+                sha: baseRef.data.object.sha,
+                headers: {
+                  authorization: 'token ' + process.env.DOCS_PAT
+                }
               });
               
               // Create a test file
-              await docsOctokit.rest.repos.createOrUpdateFileContents({
+              await github.rest.repos.createOrUpdateFileContents({
                 owner: docsOwner,
                 repo: docsRepo,
                 path: 'test-file.md',
                 message: 'Test PR creation from workflow',
                 content: Buffer.from('# Test File\n\nThis is a test file created by the workflow.').toString('base64'),
-                branch: branchName
+                branch: branchName,
+                headers: {
+                  authorization: 'token ' + process.env.DOCS_PAT
+                }
               });
               
               // Create pull request in docs repo
-              const docsPR = await docsOctokit.rest.pulls.create({
+              const docsPR = await github.rest.pulls.create({
                 owner: docsOwner,
                 repo: docsRepo,
                 title: 'Test PR from workflow',
                 head: branchName,
                 base: baseBranch,
-                body: 'This is a test PR created by the GitHub Actions workflow to verify PR creation functionality.'
+                body: 'This is a test PR created by the GitHub Actions workflow to verify PR creation functionality.',
+                headers: {
+                  authorization: 'token ' + process.env.DOCS_PAT
+                }
               });
               
               // Comment on original PR about the docs PR
