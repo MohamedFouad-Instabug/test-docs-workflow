@@ -90,14 +90,15 @@ jobs:
         run: |
           echo "🔍 Matching changed files to documentation..."
           
-          cd docs-repo
-          
-          # Get the changed files from the analyze-changes step
+          # Get the changed files from the original repository context (before changing directories)
           CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
           PR_TITLE="${{ github.event.pull_request.title }}"
           
           echo "Changed files to process:"
           echo "$CHANGED_FILES"
+          
+          # Now change to docs repo for file matching
+          cd docs-repo
           
           # Initialize variables
           MATCHED_FILES=""
