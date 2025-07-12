@@ -186,8 +186,8 @@ jobs:
           PR_BODY="${{ github.event.pull_request.body || '' }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
           PR_URL="${{ github.event.pull_request.html_url }}"
-          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
-          DIFF_CONTENT=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | head -c 10000)
+          CHANGED_FILES="${{ steps.extract-pr-info.outputs.changed_files }}"
+          DIFF_CONTENT="${{ steps.extract-pr-info.outputs.diff_content }}"
           FILE_STRUCTURE="${{ steps.clone-docs.outputs.file_structure }}"
           MATCHED_FILES="${{ steps.match-files.outputs.matched_files }}"
           MATCHED_CONTENT="${{ steps.match-files.outputs.matched_content }}"
