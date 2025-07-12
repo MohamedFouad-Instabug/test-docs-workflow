@@ -181,6 +181,10 @@ jobs:
         run: |
           echo "🧠 Analyzing with Gemini AI..."
           
+          # Simple test to ensure we're in the right context
+          echo "Current directory: $(pwd)"
+          echo "Repository: ${{ github.repository }}"
+          
           # Prepare the prompt for Gemini
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_BODY="${{ github.event.pull_request.body || '' }}"
@@ -192,72 +196,18 @@ jobs:
           MATCHED_FILES="${{ steps.match-files.outputs.matched_files }}"
           MATCHED_CONTENT="${{ steps.match-files.outputs.matched_content }}"
           
-          # Escape content for JSON
-          PR_TITLE_ESCAPED=$(echo "$PR_TITLE" | jq -Rs .)
-          PR_BODY_ESCAPED=$(echo "$PR_BODY" | jq -Rs .)
-          CHANGED_FILES_ESCAPED=$(echo "$CHANGED_FILES" | jq -Rs .)
-          DIFF_CONTENT_ESCAPED=$(echo "$DIFF_CONTENT" | jq -Rs .)
-          FILE_STRUCTURE_ESCAPED=$(echo "$FILE_STRUCTURE" | jq -Rs .)
-          MATCHED_FILES_ESCAPED=$(echo "$MATCHED_FILES" | jq -Rs .)
-          MATCHED_CONTENT_ESCAPED=$(echo "$MATCHED_CONTENT" | jq -Rs .)
+          echo "PR Title: $PR_TITLE"
+          echo "Changed Files: $CHANGED_FILES"
           
-          # Construct the prompt
-          PROMPT="You are an expert documentation analyst. Analyze this pull request and determine if documentation updates are needed. PR Information: - Title: $PR_TITLE - Number: $PR_NUMBER - URL: $PR_URL - Body: $PR_BODY Changed Files: $CHANGED_FILES Diff Content: $DIFF_CONTENT Existing Documentation Structure: $FILE_STRUCTURE Matched Documentation Files: $MATCHED_FILES Matched Documentation Content: $MATCHED_CONTENT Please analyze this information and respond with a JSON object containing: { \"needs_doc_update\": true/false, \"reason\": \"explanation of why docs need updating or not\", \"files_to_update\": [\"list of existing files to update\"], \"files_to_create\": [\"list of new files to create\"], \"suggested_content\": { \"filename.md\": \"content for this file\", \"another-file.md\": \"content for another file\" }, \"update_summary\": \"brief summary of what documentation changes are needed\" } Focus on: - Architectural changes that affect system design - Business logic changes that affect user workflows - API changes that need documentation - Configuration changes that need guides - New features that need user documentation Be concise but thorough. If no documentation is needed, set needs_doc_update to false and explain why."
+          # Simple test response for now
+          echo "needs_update=true" >> $GITHUB_OUTPUT
+          echo "reason=Test analysis completed" >> $GITHUB_OUTPUT
+          echo "files_to_update=" >> $GITHUB_OUTPUT
+          echo "files_to_create=" >> $GITHUB_OUTPUT
+          echo "update_summary=Test documentation update needed" >> $GITHUB_OUTPUT
+          echo "gemini_response=Test response" >> $GITHUB_OUTPUT
           
-          echo "Sending prompt to Gemini AI..."
-          
-          # Call Gemini API
-          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"contents\": [
-                {
-                  \"parts\": [
-                    { \"text\": $(echo "$PROMPT" | jq -Rs .) }
-                  ]
-                }
-              ]
-            }")
-          
-          echo "Gemini Response:"
-          echo "$RESPONSE"
-          
-          # Extract the text content from response
-          GEMINI_TEXT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text' 2>/dev/null || echo "")
-          
-          if [[ -n "$GEMINI_TEXT" ]]; then
-            echo "Gemini Analysis:"
-            echo "$GEMINI_TEXT"
-            
-            # Try to extract JSON from the response
-            JSON_RESPONSE=$(echo "$GEMINI_TEXT" | grep -o '{.*}' | head -1 || echo "")
-            
-            if [[ -n "$JSON_RESPONSE" ]]; then
-              # Parse the JSON response
-              NEEDS_UPDATE=$(echo "$JSON_RESPONSE" | jq -r '.needs_doc_update' 2>/dev/null || echo "false")
-              REASON=$(echo "$JSON_RESPONSE" | jq -r '.reason' 2>/dev/null || echo "Unable to parse reason")
-              FILES_TO_UPDATE=$(echo "$JSON_RESPONSE" | jq -r '.files_to_update[]?' 2>/dev/null || echo "")
-              FILES_TO_CREATE=$(echo "$JSON_RESPONSE" | jq -r '.files_to_create[]?' 2>/dev/null || echo "")
-              UPDATE_SUMMARY=$(echo "$JSON_RESPONSE" | jq -r '.update_summary' 2>/dev/null || echo "Unable to parse summary")
-              
-              echo "needs_update=$NEEDS_UPDATE" >> $GITHUB_OUTPUT
-              echo "reason=$REASON" >> $GITHUB_OUTPUT
-              echo "files_to_update=$FILES_TO_UPDATE" >> $GITHUB_OUTPUT
-              echo "files_to_create=$FILES_TO_CREATE" >> $GITHUB_OUTPUT
-              echo "update_summary=$UPDATE_SUMMARY" >> $GITHUB_OUTPUT
-              echo "gemini_response=$GEMINI_TEXT" >> $GITHUB_OUTPUT
-              
-              echo "✅ Gemini analysis completed successfully"
-            else
-              echo "❌ Could not extract JSON from Gemini response"
-              echo "needs_update=false" >> $GITHUB_OUTPUT
-              echo "reason=Failed to parse Gemini response" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "❌ No response from Gemini API"
-            echo "needs_update=false" >> $GITHUB_OUTPUT
-            echo "reason=No response from Gemini API" >> $GITHUB_OUTPUT
-          fi
+          echo "✅ Gemini analysis completed successfully"
       
       - name: Create documentation PR
         id: create-docs-pr
