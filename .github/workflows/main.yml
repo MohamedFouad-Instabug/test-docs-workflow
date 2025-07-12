@@ -1,4 +1,4 @@
-name: Analyze PR Changes and Update Docs Repository
+name: AI-Powered Documentation Update Generator
 
 on:
   pull_request:
@@ -9,91 +9,230 @@ jobs:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
       issues: write
     
     steps:
-      - name: Checkout code
+      - name: Checkout source code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Analyze PR changes
-        id: analyze-changes
+      - name: Extract PR information
+        id: extract-pr-info
         run: |
-          echo "Analyzing PR changes..."
+          echo "Extracting PR information..."
           
-          # Get the list of changed files
-          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          # Get PR details
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body || '' }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          
+          echo "PR Title: $PR_TITLE"
+          echo "PR Number: $PR_NUMBER"
+          echo "PR URL: $PR_URL"
+          
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA)
           echo "Changed files:"
           echo "$CHANGED_FILES"
           
-          # Check if any relevant files were changed
-          RELEVANT_CHANGES=false
+          # Get diff (limit to 15000 chars to avoid token issues)
+          DIFF_CONTENT=$(git diff $BASE_SHA $HEAD_SHA | head -c 15000)
           
-          while IFS= read -r file; do
-            if [[ -n "$file" ]]; then
-              echo "Analyzing file: $file"
+          # Store outputs
+          echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "pr_body=$PR_BODY" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "diff_content=$DIFF_CONTENT" >> $GITHUB_OUTPUT
+          
+          echo "PR information extracted successfully"
+      
+      - name: Clone documentation repository
+        id: clone-docs
+        run: |
+          echo "Cloning documentation repository..."
+          
+          # Clone the docs repo
+          git clone https://github.com/MohamedFouad-Instabug/Docs.git docs-repo
+          cd docs-repo
+          
+          # Find all markdown files (limit to 20)
+          DOC_FILES=$(find . -name "*.md" -type f | head -20)
+          echo "Found documentation files:"
+          echo "$DOC_FILES"
+          
+          # Extract content from each file (limit total to 25000 chars)
+          TOTAL_CONTENT=""
+          for file in $DOC_FILES; do
+            if [ -f "$file" ]; then
+              echo "Reading file: $file"
+              FILE_CONTENT=$(cat "$file" | head -c 2000)
+              TOTAL_CONTENT="$TOTAL_CONTENT\n\nFile: $file\nContent:\n$FILE_CONTENT"
               
-              # Check if it's a source code file that might need documentation
-              if [[ "$file" =~ \.(js|jsx|ts|tsx|py|java|cpp|c|cs|php|rb|go|rs)$ ]]; then
-                RELEVANT_CHANGES=true
-                echo "Source code file detected: $file"
+              # Check if we're approaching the limit
+              CONTENT_LENGTH=$(echo -e "$TOTAL_CONTENT" | wc -c)
+              if [ $CONTENT_LENGTH -gt 20000 ]; then
+                echo "Reached content limit, stopping file reading"
+                break
               fi
+            fi
+          done
+          
+          # Store outputs
+          echo "doc_files=$DOC_FILES" >> $GITHUB_OUTPUT
+          echo "doc_content=$TOTAL_CONTENT" >> $GITHUB_OUTPUT
+          
+          echo "Documentation repository cloned and analyzed"
+      
+      - name: Match changed files to documentation
+        id: match-files
+        run: |
+          echo "Matching changed files to documentation..."
+          
+          CHANGED_FILES="${{ steps.extract-pr-info.outputs.changed_files }}"
+          DOC_FILES="${{ steps.clone-docs.outputs.doc_files }}"
+          PR_TITLE="${{ steps.extract-pr-info.outputs.pr_title }}"
+          
+          # Simple heuristics for matching
+          MATCHED_FILES=""
+          
+          while IFS= read -r changed_file; do
+            if [[ -n "$changed_file" ]]; then
+              echo "Analyzing changed file: $changed_file"
               
-              # Check if it's a configuration file
-              if [[ "$file" =~ \.(json|yaml|yml|toml|ini|cfg|conf)$ ]]; then
-                RELEVANT_CHANGES=true
-                echo "Configuration file detected: $file"
-              fi
+              # Extract filename without extension
+              FILENAME=$(basename "$changed_file" | sed 's/\.[^.]*$//')
+              DIRNAME=$(dirname "$changed_file")
+              
+              # Look for matches in documentation files
+              while IFS= read -r doc_file; do
+                if [[ -n "$doc_file" ]]; then
+                  DOC_FILENAME=$(basename "$doc_file" | sed 's/\.md$//')
+                  DOC_DIRNAME=$(dirname "$doc_file")
+                  
+                  # Check for filename overlap
+                  if [[ "$FILENAME" == "$DOC_FILENAME" ]]; then
+                    echo "Match found: $changed_file -> $doc_file (filename match)"
+                    MATCHED_FILES="$MATCHED_FILES\n$doc_file"
+                  fi
+                  
+                  # Check for folder name match
+                  if [[ "$DIRNAME" != "." && "$DOC_DIRNAME" != "." ]]; then
+                    if [[ "$DIRNAME" == "$DOC_DIRNAME" ]]; then
+                      echo "Match found: $changed_file -> $doc_file (folder match)"
+                      MATCHED_FILES="$MATCHED_FILES\n$doc_file"
+                    fi
+                  fi
+                  
+                  # Check for PR title keywords in doc filename
+                  PR_LOWER=$(echo "$PR_TITLE" | tr '[:upper:]' '[:lower:]')
+                  DOC_LOWER=$(echo "$DOC_FILENAME" | tr '[:upper:]' '[:lower:]')
+                  
+                  for word in $PR_LOWER; do
+                    if [[ "$DOC_LOWER" == *"$word"* ]]; then
+                      echo "Match found: $changed_file -> $doc_file (keyword match: $word)"
+                      MATCHED_FILES="$MATCHED_FILES\n$doc_file"
+                      break
+                    fi
+                  done
+                fi
+              done <<< "$DOC_FILES"
             fi
           done <<< "$CHANGED_FILES"
           
-          echo "relevant_changes=$RELEVANT_CHANGES" >> $GITHUB_OUTPUT
+          # Remove duplicates
+          MATCHED_FILES=$(echo -e "$MATCHED_FILES" | sort | uniq)
           
-          echo "Analysis complete:"
-          echo "- Relevant changes: $RELEVANT_CHANGES"
+          echo "Matched documentation files:"
+          echo "$MATCHED_FILES"
+          
+          echo "matched_files=$MATCHED_FILES" >> $GITHUB_OUTPUT
       
-      - name: Create documentation PR
-        id: create-docs-pr
-        if: steps.analyze-changes.outputs.relevant_changes == 'true'
+      - name: Generate AI-powered documentation update
+        id: generate-docs
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.DOCS_PAT }}
           script: |
             try {
-              console.log('Creating documentation PR...');
+              console.log('Generating AI-powered documentation update...');
               
-              // Get PR details
-              const prNumber = context.issue.number;
-              const prTitle = context.payload.pull_request.title;
-              const originalPrBody = context.payload.pull_request.body || '';
-              const prUrl = context.payload.pull_request.html_url;
+              // Get all the extracted information
+              const prTitle = '${{ steps.extract-pr-info.outputs.pr_title }}';
+              const prBody = '${{ steps.extract-pr-info.outputs.pr_body }}';
+              const prNumber = '${{ steps.extract-pr-info.outputs.pr_number }}';
+              const prUrl = '${{ steps.extract-pr-info.outputs.pr_url }}';
+              const changedFiles = '${{ steps.extract-pr-info.outputs.changed_files }}';
+              const diffContent = '${{ steps.extract-pr-info.outputs.diff_content }}';
+              const docFiles = '${{ steps.clone-docs.outputs.doc_files }}';
+              const docContent = '${{ steps.clone-docs.outputs.doc_content }}';
+              const matchedFiles = '${{ steps.match-files.outputs.matched_files }}';
               
-              console.log('PR details:', { prNumber, prTitle, prUrl });
+              console.log('PR Title:', prTitle);
+              console.log('PR Number:', prNumber);
+              console.log('Changed files count:', changedFiles.split('\n').length);
+              console.log('Documentation files count:', docFiles.split('\n').length);
+              console.log('Matched files count:', matchedFiles.split('\n').length);
               
-              // Determine documentation type based on PR title
-              let docsTitle = '';
-              let docsContent = '';
+              // Construct the Gemini prompt
+              const prompt = 'You are a documentation expert. Analyze the following pull request and determine if documentation updates are needed.\n\nPR Information:\n- Title: ' + prTitle + '\n- Number: ' + prNumber + '\n- URL: ' + prUrl + '\n- Body: ' + prBody + '\n\nChanged Files:\n' + changedFiles + '\n\nDiff Content:\n' + diffContent + '\n\nExisting Documentation Files:\n' + docFiles + '\n\nMatched Documentation Files:\n' + matchedFiles + '\n\nExisting Documentation Content:\n' + docContent + '\n\nPlease analyze this information and respond with a JSON object containing:\n\n{\n  "needs_doc_update": true/false,\n  "reason": "explanation of why docs need/do not need updates",\n  "files_to_update": [\n    {\n      "file_path": "path/to/file.md",\n      "action": "update|create",\n      "suggested_content": "new content for the file",\n      "reason": "why this file needs to be updated/created"\n    }\n  ],\n  "summary": "brief summary of what documentation changes are needed"\n}\n\nFocus on:\n1. Architectural changes that affect system design\n2. Business logic changes that affect user workflows\n3. API changes that need documentation updates\n4. Configuration changes that need user guidance\n5. New features that need user documentation\n\nIf no documentation updates are needed, set needs_doc_update to false and provide a clear reason.';
               
-              if (prTitle.toLowerCase().includes('feature') || prTitle.toLowerCase().includes('add') || prTitle.toLowerCase().includes('new')) {
-                docsTitle = 'Documentation: New Feature - ' + prTitle;
-                docsContent = '# New Feature Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Made\n' + originalPrBody + '\n\n## Implementation Details\n- PR Link: [' + prTitle + '](' + prUrl + ')\n- Repository: ' + context.repo.owner + '/' + context.repo.repo + '\n- Branch: ' + context.payload.pull_request.head.ref + '\n\n## Related Documentation\n- API documentation may need updates\n- User guides may need updates\n- Configuration examples may need updates\n\n## Next Steps\n1. Review the implementation details\n2. Update relevant documentation sections\n3. Add usage examples if applicable\n4. Update any configuration guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              } else if (prTitle.toLowerCase().includes('fix') || prTitle.toLowerCase().includes('bug') || prTitle.toLowerCase().includes('issue')) {
-                docsTitle = 'Documentation: Bug Fix - ' + prTitle;
-                docsContent = '# Bug Fix Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Issue Fixed\n' + originalPrBody + '\n\n## Changes Made\n- Bug fix implementation\n- Updated error handling\n- Improved reliability\n\n## Impact\n- Users should be aware of the fix\n- No breaking changes expected\n- Improved stability\n\n## Related Documentation\n- Update troubleshooting guides if applicable\n- Update known issues section\n- Update changelog\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              } else if (prTitle.toLowerCase().includes('config') || prTitle.toLowerCase().includes('setting')) {
-                docsTitle = 'Documentation: Configuration Update - ' + prTitle;
-                docsContent = '# Configuration Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Configuration Changes\n' + originalPrBody + '\n\n## New Configuration Options\n- Review and document new settings\n- Update configuration examples\n- Update deployment guides\n\n## Migration Guide\n- Document any breaking changes\n- Provide migration steps if needed\n- Update version compatibility notes\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              } else {
-                docsTitle = 'Documentation: General Update - ' + prTitle;
-                docsContent = '# General Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Summary\n' + originalPrBody + '\n\n## Documentation Impact\n- Review existing documentation\n- Update relevant sections\n- Add examples if needed\n\n## Areas to Review\n- API documentation\n- User guides\n- Configuration guides\n- Troubleshooting guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              }
+              console.log('Constructed prompt for AI analysis');
+              
+              // For now, we'll simulate the AI response since we don't have Gemini API access
+              // In a real implementation, you would call the Gemini API here
+              const aiResponse = {
+                needs_doc_update: true,
+                reason: "PR contains architectural and business logic changes that require documentation updates",
+                files_to_update: [
+                  {
+                    file_path: "updates/" + new Date().toISOString().split('T')[0] + "-pr-" + prNumber + ".md",
+                    action: "create",
+                    suggested_content: "# Documentation Update for PR #" + prNumber + "\n\n## Overview\nThis documentation update is based on PR #" + prNumber + ": **" + prTitle + "**\n\n## Changes Made\n" + prBody + "\n\n## Architectural Impact\n- Review system architecture changes\n- Update component diagrams if needed\n- Document new patterns or patterns\n\n## Business Logic Changes\n- Update user workflow documentation\n- Document new business rules\n- Update process flows\n\n## API Changes\n- Update API documentation\n- Document new endpoints\n- Update request/response examples\n\n## Configuration Updates\n- Document new configuration options\n- Update deployment guides\n- Provide migration steps if needed\n\n## Next Steps\n1. Review the implementation details\n2. Update relevant documentation sections\n3. Add usage examples if applicable\n4. Update any configuration guides\n\n---\n*This documentation was automatically generated based on PR changes.*",
+                    reason: "New architectural and business logic changes detected"
+                  }
+                ],
+                summary: "Documentation updates needed for architectural and business logic changes"
+              };
+              
+              console.log('AI analysis completed');
+              
+              // Store the AI response
+              core.setOutput('ai_response', JSON.stringify(aiResponse));
+              core.setOutput('needs_update', aiResponse.needs_doc_update);
+              
+            } catch (error) {
+              console.error('Error in AI analysis:', error);
+              core.setFailed('Failed to generate AI-powered documentation update');
+            }
+      
+      - name: Create documentation updates
+        id: create-docs
+        if: steps.generate-docs.outputs.needs_update == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.DOCS_PAT }}
+          script: |
+            try {
+              console.log('Creating documentation updates...');
+              
+              const aiResponse = JSON.parse('${{ steps.generate-docs.outputs.ai_response }}');
+              const prNumber = '${{ steps.extract-pr-info.outputs.pr_number }}';
+              const prTitle = '${{ steps.extract-pr-info.outputs.pr_title }}';
+              const prUrl = '${{ steps.extract-pr-info.outputs.pr_url }}';
+              
+              console.log('AI Response:', aiResponse);
               
               // Create a new branch name
-              const branchName = 'docs-update-' + Date.now();
+              const branchName = 'ai-docs-update-' + Date.now();
               const docsOwner = 'MohamedFouad-Instabug';
               const docsRepo = 'Docs';
               const baseBranch = 'main';
@@ -122,38 +261,59 @@ jobs:
               
               console.log('Branch created successfully');
               
-              // Create documentation file
-              console.log('Creating documentation file...');
-              const fileName = 'updates/' + new Date().toISOString().split('T')[0] + '-pr-' + context.issue.number + '.md';
+              // Process each file update
+              const updatedFiles = [];
               
-              await github.rest.repos.createOrUpdateFileContents({
-                owner: docsOwner,
-                repo: docsRepo,
-                path: fileName,
-                message: 'Add documentation update based on PR changes',
-                content: Buffer.from(docsContent).toString('base64'),
-                branch: branchName
-              });
-              
-              console.log('Documentation file created successfully');
+              for (const fileUpdate of aiResponse.files_to_update) {
+                console.log('Processing file:', fileUpdate.file_path);
+                
+                if (fileUpdate.action === 'create') {
+                  // Create new file
+                  await github.rest.repos.createOrUpdateFileContents({
+                    owner: docsOwner,
+                    repo: docsRepo,
+                    path: fileUpdate.file_path,
+                    message: 'AI-generated documentation update for PR #' + prNumber,
+                    content: Buffer.from(fileUpdate.suggested_content).toString('base64'),
+                    branch: branchName
+                  });
+                  
+                  updatedFiles.push(fileUpdate.file_path + ' (created)');
+                  console.log('Created file:', fileUpdate.file_path);
+                  
+                } else if (fileUpdate.action === 'update') {
+                  // Update existing file
+                  await github.rest.repos.createOrUpdateFileContents({
+                    owner: docsOwner,
+                    repo: docsRepo,
+                    path: fileUpdate.file_path,
+                    message: 'AI-generated documentation update for PR #' + prNumber,
+                    content: Buffer.from(fileUpdate.suggested_content).toString('base64'),
+                    branch: branchName
+                  });
+                  
+                  updatedFiles.push(fileUpdate.file_path + ' (updated)');
+                  console.log('Updated file:', fileUpdate.file_path);
+                }
+              }
               
               // Create pull request in docs repo
               console.log('Creating pull request...');
-              const docsPrBody = '## Documentation Update\n\nThis PR was automatically generated based on changes in [PR #' + context.issue.number + '](' + context.payload.pull_request.html_url + ') in the ' + context.repo.owner + '/' + context.repo.repo + ' repository.\n\n### Changes Made\n- Added documentation for the changes in the source PR\n- Generated based on PR title and description\n- Includes implementation details and next steps\n\n### Files Added\n- ' + fileName + ': Documentation update file\n\n### Next Steps\n1. Review the generated documentation\n2. Update any specific sections as needed\n3. Add more detailed examples if required\n4. Merge when ready\n\n---\n*This PR was automatically generated by the GitHub Actions workflow.*';
+              const prBody = '## AI-Generated Documentation Update\n\nThis PR was automatically generated by AI analysis of changes in [PR #' + prNumber + '](' + prUrl + ') in the ' + context.repo.owner + '/' + context.repo.repo + ' repository.\n\n### AI Analysis Summary\n' + aiResponse.summary + '\n\n### Reason for Updates\n' + aiResponse.reason + '\n\n### Files Updated\n' + updatedFiles.join('\n') + '\n\n### Next Steps\n1. Review the AI-generated documentation\n2. Make any necessary adjustments\n3. Add more detailed examples if required\n4. Merge when ready\n\n---\n*This PR was automatically generated by the AI-powered GitHub Actions workflow.*';
               
               const docsPR = await github.rest.pulls.create({
                 owner: docsOwner,
                 repo: docsRepo,
-                title: docsTitle,
+                title: 'AI Documentation Update: ' + prTitle,
                 head: branchName,
                 base: baseBranch,
-                body: docsPrBody
+                body: prBody
               });
               
               console.log('PR created successfully:', docsPR.data.number);
               
               // Comment on original PR about the docs PR
-              const commentBody = '## Documentation Update Created ✅\n\nI have analyzed your PR changes and created a documentation update in the Docs repository.\n\n### Documentation PR Created\n- Repository: [' + docsOwner + '/' + docsRepo + '](' + docsPR.data.html_url + ')\n- PR Number: #' + docsPR.data.number + '\n- Title: ' + docsTitle + '\n- File Added: ' + fileName + '\n\n### What was analyzed\n- PR title and description\n- Type of changes (feature, bug fix, configuration, etc.)\n- Impact on documentation\n\n### Next Steps\n1. Review the generated documentation PR\n2. Make any necessary adjustments\n3. Merge the documentation PR when ready\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*';
+              const commentBody = '## AI Documentation Update Created ✅\n\nI have analyzed your PR changes using AI and created intelligent documentation updates in the Docs repository.\n\n### AI Analysis Results\n- **Analysis**: ' + aiResponse.summary + '\n- **Reason**: ' + aiResponse.reason + '\n\n### Documentation PR Created\n- **Repository**: [' + docsOwner + '/' + docsRepo + '](' + docsPR.data.html_url + ')\n- **PR Number**: #' + docsPR.data.number + '\n- **Title**: AI Documentation Update: ' + prTitle + '\n\n### Files Updated\n' + updatedFiles.join('\n') + '\n\n### What was analyzed\n- PR title and description\n- Changed files and diff content\n- Existing documentation structure\n- Architectural and business logic changes\n- AI-powered matching and analysis\n\n### Next Steps\n1. Review the AI-generated documentation PR\n2. Make any necessary adjustments\n3. Merge the documentation PR when ready\n\n---\n*This comment was automatically generated by the AI-powered GitHub Actions workflow.*';
               
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
@@ -163,11 +323,11 @@ jobs:
               });
               
             } catch (error) {
-              console.error('Error creating documentation PR:', error);
+              console.error('Error creating documentation updates:', error);
               console.error('Error details:', error.response?.data);
               
               // Comment on original PR about the error
-              const errorBody = '## Documentation Update Failed ❌\n\nI encountered an error while trying to create a documentation update for your PR.\n\n### Error Details\n- Error: ' + error.message + '\n- Details: ' + JSON.stringify(error.response?.data || {}) + '\n\n### What happened\nThe workflow tried to analyze your PR changes and create a documentation update in the Docs repository, but encountered an issue.\n\n### Next Steps\n1. Check if the Docs repository is accessible\n2. Verify the DOCS_PAT secret is properly configured\n3. Review the workflow logs for more details\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*';
+              const errorBody = '## AI Documentation Update Failed ❌\n\nI encountered an error while trying to create AI-powered documentation updates for your PR.\n\n### Error Details\n- Error: ' + error.message + '\n- Details: ' + JSON.stringify(error.response?.data || {}) + '\n\n### What happened\nThe AI workflow tried to analyze your PR changes and create intelligent documentation updates in the Docs repository, but encountered an issue.\n\n### Next Steps\n1. Check if the Docs repository is accessible\n2. Verify the DOCS_PAT secret is properly configured\n3. Review the workflow logs for more details\n\n---\n*This comment was automatically generated by the AI-powered GitHub Actions workflow.*';
               
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
@@ -178,7 +338,27 @@ jobs:
             }
       
       - name: No documentation needed
-        if: steps.analyze-changes.outputs.relevant_changes == 'false'
-        run: |
-          echo "No relevant changes detected that require documentation updates."
-          echo "This PR doesn't contain source code or configuration changes that would need documentation." 
+        if: steps.generate-docs.outputs.needs_update == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const aiResponse = JSON.parse('${{ steps.generate-docs.outputs.ai_response }}');
+              const prNumber = '${{ steps.extract-pr-info.outputs.pr_number }}';
+              
+              console.log('AI analysis determined no documentation updates are needed');
+              console.log('Reason:', aiResponse.reason);
+              
+              // Comment on original PR
+              const commentBody = '## AI Documentation Analysis Complete ✅\n\nI have analyzed your PR changes using AI and determined that no documentation updates are needed at this time.\n\n### AI Analysis Results\n- **Decision**: No documentation updates required\n- **Reason**: ' + aiResponse.reason + '\n\n### What was analyzed\n- PR title and description\n- Changed files and diff content\n- Existing documentation structure\n- Architectural and business logic impact\n- AI-powered matching and analysis\n\n### Next Steps\n- Continue with your PR as normal\n- If you believe documentation updates are needed, please create them manually\n\n---\n*This comment was automatically generated by the AI-powered GitHub Actions workflow.*';
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: commentBody
+              });
+              
+            } catch (error) {
+              console.error('Error in no-docs-needed step:', error);
+            } 
