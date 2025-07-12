@@ -43,13 +43,17 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED_FILES"
           
-          # Store in outputs
+          # Store in outputs - escape newlines for GitHub Actions
           echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
           echo "pr_body=$PR_BODY" >> $GITHUB_OUTPUT
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
-          echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
-          echo "diff_content=$DIFF_CONTENT" >> $GITHUB_OUTPUT
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "diff_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo "✅ PR information extracted successfully"
       
@@ -95,8 +99,8 @@ jobs:
           MATCHED_FILES=""
           MATCHED_CONTENT=""
           
-          # Process each changed file - handle multi-line input properly
-          echo "$CHANGED_FILES" | while IFS= read -r file; do
+          # Process each changed file - use a simpler approach
+          while IFS= read -r file; do
             if [[ -n "$file" ]]; then
               echo "Analyzing file: $file"
               
@@ -147,7 +151,7 @@ jobs:
                 echo "  No matches found for: $file"
               fi
             fi
-          done
+          done <<< "$CHANGED_FILES"
           
           # Limit total content to 15000 characters
           MATCHED_CONTENT=$(echo -e "$MATCHED_CONTENT" | head -c 15000)
