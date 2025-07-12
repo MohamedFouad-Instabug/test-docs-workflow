@@ -4,22 +4,22 @@ import './App.css';
 const recipes = [
   {
     id: 1,
-    name: 'Spaghettii Carbonara',
+    name: 'Spaghettii Carbbonara',
     ingredients: [
       '200g spaghetti',
-      '100g pancetta',
-      '2 large egggs',
-      '50g pecorino cheese',
+      '100g pancettaaaaaa',
+      '2 large egasggs',
+      '50g pecorino cheeseesd',
       '50g parmesan',
-      'Black pepper',
-      'Salt'
+      'Blaffck peprperr',
+      'Saltt'
     ],
     instructions: [
-      'Boil the spagheffftti in salted water.',
-      'Fry the pancetta until crisp.',
+      'Boil theh spaghetti dfsdsddf salted waterr.',
+      'Fry the pancffetta sfsduntil crisp.',
       'Beat the eggs and mix with the cheeses.',
-      'Drain the pasta and mix with pancetta and egg-cheese mixture off the heat.',
-      'Season with black pepper and serve.'
+      'Drain the pasta ddand mix with pancetta and egg-cheese mixture off the heat.',
+      'Season with blaxck pepper and serve.'
     ]
   },
   {
