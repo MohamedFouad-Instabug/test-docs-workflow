@@ -9,8 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
+      issues: write
     
     steps:
       - name: Checkout code
@@ -21,8 +22,6 @@ jobs:
       
       - name: Create test PR to docs repository
         uses: actions/github-script@v7
-        env:
-          DOCS_PAT: ${{ secrets.DOCS_PAT }}
         with:
           script: |
             try {
@@ -32,52 +31,54 @@ jobs:
               const docsRepo = 'Docs';
               const baseBranch = 'main';
               
+              console.log('Starting PR creation process...');
+              
               // Get the base branch ref
+              console.log('Getting base branch ref...');
               const baseRef = await github.rest.git.getRef({
                 owner: docsOwner,
                 repo: docsRepo,
-                ref: 'heads/' + baseBranch,
-                headers: {
-                  authorization: 'token ' + process.env.DOCS_PAT
-                }
+                ref: 'heads/' + baseBranch
               });
               
+              console.log('Base ref obtained:', baseRef.data.object.sha);
+              
               // Create a new branch
+              console.log('Creating new branch:', branchName);
               await github.rest.git.createRef({
                 owner: docsOwner,
                 repo: docsRepo,
                 ref: 'refs/heads/' + branchName,
-                sha: baseRef.data.object.sha,
-                headers: {
-                  authorization: 'token ' + process.env.DOCS_PAT
-                }
+                sha: baseRef.data.object.sha
               });
               
+              console.log('Branch created successfully');
+              
               // Create a test file
+              console.log('Creating test file...');
               await github.rest.repos.createOrUpdateFileContents({
                 owner: docsOwner,
                 repo: docsRepo,
                 path: 'test-file.md',
                 message: 'Test PR creation from workflow',
                 content: Buffer.from('# Test File\n\nThis is a test file created by the workflow.').toString('base64'),
-                branch: branchName,
-                headers: {
-                  authorization: 'token ' + process.env.DOCS_PAT
-                }
+                branch: branchName
               });
               
+              console.log('Test file created successfully');
+              
               // Create pull request in docs repo
+              console.log('Creating pull request...');
               const docsPR = await github.rest.pulls.create({
                 owner: docsOwner,
                 repo: docsRepo,
                 title: 'Test PR from workflow',
                 head: branchName,
                 base: baseBranch,
-                body: 'This is a test PR created by the GitHub Actions workflow to verify PR creation functionality.',
-                headers: {
-                  authorization: 'token ' + process.env.DOCS_PAT
-                }
+                body: 'This is a test PR created by the GitHub Actions workflow to verify PR creation functionality.'
               });
+              
+              console.log('PR created successfully:', docsPR.data.number);
               
               // Comment on original PR about the docs PR
               await github.rest.issues.createComment({
@@ -89,12 +90,13 @@ jobs:
               
             } catch (error) {
               console.error('Error creating test PR:', error);
+              console.error('Error details:', error.response?.data);
               
               // Comment on original PR about the error
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: 'Error creating test PR: ' + error.message
+                body: 'Error creating test PR: ' + error.message + '\n\nDetails: ' + JSON.stringify(error.response?.data || {})
               });
             } 
