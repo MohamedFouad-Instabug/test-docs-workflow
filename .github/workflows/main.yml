@@ -32,7 +32,6 @@ jobs:
           
           # Check if any relevant files were changed
           RELEVANT_CHANGES=false
-          DOCS_NEEDED=false
           
           while IFS= read -r file; do
             if [[ -n "$file" ]]; then
@@ -49,75 +48,13 @@ jobs:
                 RELEVANT_CHANGES=true
                 echo "Configuration file detected: $file"
               fi
-              
-              # Check if it's a README or documentation file
-              if [[ "$file" =~ README|\.md$|\.rst$|docs/ ]]; then
-                DOCS_NEEDED=true
-                echo "Documentation file detected: $file"
-              fi
             fi
           done <<< "$CHANGED_FILES"
           
           echo "relevant_changes=$RELEVANT_CHANGES" >> $GITHUB_OUTPUT
-          echo "docs_needed=$DOCS_NEEDED" >> $GITHUB_OUTPUT
           
           echo "Analysis complete:"
           echo "- Relevant changes: $RELEVANT_CHANGES"
-          echo "- Docs needed: $DOCS_NEEDED"
-      
-      - name: Generate documentation updates
-        id: generate-docs
-        if: steps.analyze-changes.outputs.relevant_changes == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.DOCS_PAT }}
-          script: |
-            try {
-              console.log('Generating documentation updates...');
-              
-              // Get PR details
-              const prNumber = context.issue.number;
-              const prTitle = context.payload.pull_request.title;
-              const prBody = context.payload.pull_request.body || '';
-              const prUrl = context.payload.pull_request.html_url;
-              
-              console.log('PR details:', { prNumber, prTitle, prUrl });
-              
-              // Analyze the changes to determine what documentation is needed
-              let docsContent = '';
-              let docsTitle = '';
-              
-              // Check if this is a new feature
-              if (prTitle.toLowerCase().includes('feature') || prTitle.toLowerCase().includes('add') || prTitle.toLowerCase().includes('new')) {
-                docsTitle = 'Documentation: New Feature - ' + prTitle;
-                docsContent = '# New Feature Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Made\n' + prBody + '\n\n## Implementation Details\n- **PR Link**: [' + prTitle + '](' + prUrl + ')\n- **Repository**: ' + context.repo.owner + '/' + context.repo.repo + '\n- **Branch**: ' + context.payload.pull_request.head.ref + '\n\n## Related Documentation\n- API documentation may need updates\n- User guides may need updates\n- Configuration examples may need updates\n\n## Next Steps\n1. Review the implementation details\n2. Update relevant documentation sections\n3. Add usage examples if applicable\n4. Update any configuration guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              }
-              // Check if this is a bug fix
-              else if (prTitle.toLowerCase().includes('fix') || prTitle.toLowerCase().includes('bug') || prTitle.toLowerCase().includes('issue')) {
-                docsTitle = 'Documentation: Bug Fix - ' + prTitle;
-                docsContent = '# Bug Fix Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Issue Fixed\n' + prBody + '\n\n## Changes Made\n- Bug fix implementation\n- Updated error handling\n- Improved reliability\n\n## Impact\n- Users should be aware of the fix\n- No breaking changes expected\n- Improved stability\n\n## Related Documentation\n- Update troubleshooting guides if applicable\n- Update known issues section\n- Update changelog\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              }
-              // Check if this is a configuration change
-              else if (prTitle.toLowerCase().includes('config') || prTitle.toLowerCase().includes('setting')) {
-                docsTitle = 'Documentation: Configuration Update - ' + prTitle;
-                docsContent = '# Configuration Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Configuration Changes\n' + prBody + '\n\n## New Configuration Options\n- Review and document new settings\n- Update configuration examples\n- Update deployment guides\n\n## Migration Guide\n- Document any breaking changes\n- Provide migration steps if needed\n- Update version compatibility notes\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              }
-              // Default case
-              else {
-                docsTitle = 'Documentation: General Update - ' + prTitle;
-                docsContent = '# General Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Summary\n' + prBody + '\n\n## Documentation Impact\n- Review existing documentation\n- Update relevant sections\n- Add examples if needed\n\n## Areas to Review\n- API documentation\n- User guides\n- Configuration guides\n- Troubleshooting guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
-              }
-              
-              // Store the generated content
-              core.setOutput('docs_title', docsTitle);
-              core.setOutput('docs_content', docsContent);
-              
-              console.log('Documentation content generated successfully');
-              
-            } catch (error) {
-              console.error('Error generating documentation:', error);
-              core.setFailed('Failed to generate documentation');
-            }
       
       - name: Create documentation PR
         id: create-docs-pr
@@ -127,10 +64,33 @@ jobs:
           github-token: ${{ secrets.DOCS_PAT }}
           script: |
             try {
-              const docsTitle = '${{ steps.generate-docs.outputs.docs_title }}';
-              const docsContent = '${{ steps.generate-docs.outputs.docs_content }}';
-              
               console.log('Creating documentation PR...');
+              
+              // Get PR details
+              const prNumber = context.issue.number;
+              const prTitle = context.payload.pull_request.title;
+              const prBody = context.payload.pull_request.body || '';
+              const prUrl = context.payload.pull_request.html_url;
+              
+              console.log('PR details:', { prNumber, prTitle, prUrl });
+              
+              // Determine documentation type based on PR title
+              let docsTitle = '';
+              let docsContent = '';
+              
+              if (prTitle.toLowerCase().includes('feature') || prTitle.toLowerCase().includes('add') || prTitle.toLowerCase().includes('new')) {
+                docsTitle = 'Documentation: New Feature - ' + prTitle;
+                docsContent = '# New Feature Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Made\n' + prBody + '\n\n## Implementation Details\n- PR Link: [' + prTitle + '](' + prUrl + ')\n- Repository: ' + context.repo.owner + '/' + context.repo.repo + '\n- Branch: ' + context.payload.pull_request.head.ref + '\n\n## Related Documentation\n- API documentation may need updates\n- User guides may need updates\n- Configuration examples may need updates\n\n## Next Steps\n1. Review the implementation details\n2. Update relevant documentation sections\n3. Add usage examples if applicable\n4. Update any configuration guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
+              } else if (prTitle.toLowerCase().includes('fix') || prTitle.toLowerCase().includes('bug') || prTitle.toLowerCase().includes('issue')) {
+                docsTitle = 'Documentation: Bug Fix - ' + prTitle;
+                docsContent = '# Bug Fix Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Issue Fixed\n' + prBody + '\n\n## Changes Made\n- Bug fix implementation\n- Updated error handling\n- Improved reliability\n\n## Impact\n- Users should be aware of the fix\n- No breaking changes expected\n- Improved stability\n\n## Related Documentation\n- Update troubleshooting guides if applicable\n- Update known issues section\n- Update changelog\n\n---\n*This documentation was automatically generated based on PR changes.*';
+              } else if (prTitle.toLowerCase().includes('config') || prTitle.toLowerCase().includes('setting')) {
+                docsTitle = 'Documentation: Configuration Update - ' + prTitle;
+                docsContent = '# Configuration Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Configuration Changes\n' + prBody + '\n\n## New Configuration Options\n- Review and document new settings\n- Update configuration examples\n- Update deployment guides\n\n## Migration Guide\n- Document any breaking changes\n- Provide migration steps if needed\n- Update version compatibility notes\n\n---\n*This documentation was automatically generated based on PR changes.*';
+              } else {
+                docsTitle = 'Documentation: General Update - ' + prTitle;
+                docsContent = '# General Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Summary\n' + prBody + '\n\n## Documentation Impact\n- Review existing documentation\n- Update relevant sections\n- Add examples if needed\n\n## Areas to Review\n- API documentation\n- User guides\n- Configuration guides\n- Troubleshooting guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
+              }
               
               // Create a new branch name
               const branchName = 'docs-update-' + Date.now();
@@ -179,23 +139,27 @@ jobs:
               
               // Create pull request in docs repo
               console.log('Creating pull request...');
+              const prBody = '## Documentation Update\n\nThis PR was automatically generated based on changes in [PR #' + context.issue.number + '](' + context.payload.pull_request.html_url + ') in the ' + context.repo.owner + '/' + context.repo.repo + ' repository.\n\n### Changes Made\n- Added documentation for the changes in the source PR\n- Generated based on PR title and description\n- Includes implementation details and next steps\n\n### Files Added\n- ' + fileName + ': Documentation update file\n\n### Next Steps\n1. Review the generated documentation\n2. Update any specific sections as needed\n3. Add more detailed examples if required\n4. Merge when ready\n\n---\n*This PR was automatically generated by the GitHub Actions workflow.*';
+              
               const docsPR = await github.rest.pulls.create({
                 owner: docsOwner,
                 repo: docsRepo,
                 title: docsTitle,
                 head: branchName,
                 base: baseBranch,
-                body: '## Documentation Update\n\nThis PR was automatically generated based on changes in [PR #' + context.issue.number + '](' + context.payload.pull_request.html_url + ') in the ' + context.repo.owner + '/' + context.repo.repo + ' repository.\n\n### Changes Made\n- Added documentation for the changes in the source PR\n- Generated based on PR title and description\n- Includes implementation details and next steps\n\n### Files Added\n- `' + fileName + '`: Documentation update file\n\n### Next Steps\n1. Review the generated documentation\n2. Update any specific sections as needed\n3. Add more detailed examples if required\n4. Merge when ready\n\n---\n*This PR was automatically generated by the GitHub Actions workflow.*'
+                body: prBody
               });
               
               console.log('PR created successfully:', docsPR.data.number);
               
               // Comment on original PR about the docs PR
+              const commentBody = '## Documentation Update Created ✅\n\nI have analyzed your PR changes and created a documentation update in the Docs repository.\n\n### Documentation PR Created\n- Repository: [' + docsOwner + '/' + docsRepo + '](' + docsPR.data.html_url + ')\n- PR Number: #' + docsPR.data.number + '\n- Title: ' + docsTitle + '\n- File Added: ' + fileName + '\n\n### What was analyzed\n- PR title and description\n- Type of changes (feature, bug fix, configuration, etc.)\n- Impact on documentation\n\n### Next Steps\n1. Review the generated documentation PR\n2. Make any necessary adjustments\n3. Merge the documentation PR when ready\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*';
+              
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: '## Documentation Update Created ✅\n\nI\'ve analyzed your PR changes and created a documentation update in the Docs repository.\n\n### Documentation PR Created\n- **Repository**: [' + docsOwner + '/' + docsRepo + '](' + docsPR.data.html_url + ')\n- **PR Number**: #' + docsPR.data.number + '\n- **Title**: ' + docsTitle + '\n- **File Added**: `' + fileName + '`\n\n### What was analyzed\n- PR title and description\n- Type of changes (feature, bug fix, configuration, etc.)\n- Impact on documentation\n\n### Next Steps\n1. Review the generated documentation PR\n2. Make any necessary adjustments\n3. Merge the documentation PR when ready\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*'
+                body: commentBody
               });
               
             } catch (error) {
@@ -203,11 +167,13 @@ jobs:
               console.error('Error details:', error.response?.data);
               
               // Comment on original PR about the error
+              const errorBody = '## Documentation Update Failed ❌\n\nI encountered an error while trying to create a documentation update for your PR.\n\n### Error Details\n- Error: ' + error.message + '\n- Details: ' + JSON.stringify(error.response?.data || {}) + '\n\n### What happened\nThe workflow tried to analyze your PR changes and create a documentation update in the Docs repository, but encountered an issue.\n\n### Next Steps\n1. Check if the Docs repository is accessible\n2. Verify the DOCS_PAT secret is properly configured\n3. Review the workflow logs for more details\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*';
+              
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: '## Documentation Update Failed ❌\n\nI encountered an error while trying to create a documentation update for your PR.\n\n### Error Details\n- **Error**: ' + error.message + '\n- **Details**: ' + JSON.stringify(error.response?.data || {}) + '\n\n### What happened\nThe workflow tried to analyze your PR changes and create a documentation update in the Docs repository, but encountered an issue.\n\n### Next Steps\n1. Check if the Docs repository is accessible\n2. Verify the `DOCS_PAT` secret is properly configured\n3. Review the workflow logs for more details\n\n---\n*This comment was automatically generated by the GitHub Actions workflow.*'
+                body: errorBody
               });
             }
       
