@@ -15,7 +15,7 @@ const recipes = [
       'Salt'
     ],
     instructions: [
-      'Boil the spaghetti in salted water.',
+      'Boil the spagheffftti in salted water.',
       'Fry the pancetta until crisp.',
       'Beat the eggs and mix with the cheeses.',
       'Drain the pasta and mix with pancetta and egg-cheese mixture off the heat.',
