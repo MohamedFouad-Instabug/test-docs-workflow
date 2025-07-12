@@ -8,7 +8,7 @@ const recipes = [
     ingredients: [
       '200g spaghetti',
       '100g pancetta',
-      '2 large eggs',
+      '2 large egggs',
       '50g pecorino cheese',
       '50g parmesan',
       'Black pepper',
