@@ -40,6 +40,8 @@ jobs:
           echo "PR Title: $PR_TITLE"
           echo "PR Number: $PR_NUMBER"
           echo "Changed files count: $(echo "$CHANGED_FILES" | wc -l)"
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
           
           # Store in outputs
           echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
@@ -86,12 +88,15 @@ jobs:
           CHANGED_FILES="${{ steps.extract-pr-info.outputs.changed_files }}"
           PR_TITLE="${{ steps.extract-pr-info.outputs.pr_title }}"
           
+          echo "Changed files to process:"
+          echo "$CHANGED_FILES"
+          
           # Initialize variables
           MATCHED_FILES=""
           MATCHED_CONTENT=""
           
-          # Process each changed file
-          while IFS= read -r file; do
+          # Process each changed file - handle multi-line input properly
+          echo "$CHANGED_FILES" | while IFS= read -r file; do
             if [[ -n "$file" ]]; then
               echo "Analyzing file: $file"
               
@@ -99,17 +104,22 @@ jobs:
               FILENAME=$(basename "$file" | sed 's/\.[^.]*$//')
               DIRNAME=$(dirname "$file")
               
+              echo "  Filename: $FILENAME"
+              echo "  Directory: $DIRNAME"
+              
               # Look for matching documentation files
               POTENTIAL_MATCHES=""
               
               # 1. Direct filename match
               if find . -name "${FILENAME}.md" -type f | grep -q .; then
                 POTENTIAL_MATCHES="$POTENTIAL_MATCHES $(find . -name "${FILENAME}.md" -type f)"
+                echo "  Found direct match: ${FILENAME}.md"
               fi
               
               # 2. Directory name match
               if [[ "$DIRNAME" != "." ]] && find . -path "*/${DIRNAME}/*.md" -type f | grep -q .; then
                 POTENTIAL_MATCHES="$POTENTIAL_MATCHES $(find . -path "*/${DIRNAME}/*.md" -type f | head -3)"
+                echo "  Found directory match for: $DIRNAME"
               fi
               
               # 3. PR title keyword match
@@ -117,6 +127,7 @@ jobs:
               for keyword in $TITLE_KEYWORDS; do
                 if find . -name "*.md" -type f -exec grep -l "$keyword" {} \; | grep -q .; then
                   POTENTIAL_MATCHES="$POTENTIAL_MATCHES $(find . -name "*.md" -type f -exec grep -l "$keyword" {} \; | head -2)"
+                  echo "  Found keyword match for: $keyword"
                 fi
               done
               
@@ -129,11 +140,14 @@ jobs:
                   if [[ -f "$match" ]]; then
                     CONTENT=$(head -c 2000 "$match")
                     MATCHED_CONTENT="$MATCHED_CONTENT\n\n--- File: $match ---\n$CONTENT"
+                    echo "  Extracted content from: $match"
                   fi
                 done
+              else
+                echo "  No matches found for: $file"
               fi
             fi
-          done <<< "$CHANGED_FILES"
+          done
           
           # Limit total content to 15000 characters
           MATCHED_CONTENT=$(echo -e "$MATCHED_CONTENT" | head -c 15000)
