@@ -69,7 +69,7 @@ jobs:
               // Get PR details
               const prNumber = context.issue.number;
               const prTitle = context.payload.pull_request.title;
-              const prBody = context.payload.pull_request.body || '';
+              const originalPrBody = context.payload.pull_request.body || '';
               const prUrl = context.payload.pull_request.html_url;
               
               console.log('PR details:', { prNumber, prTitle, prUrl });
@@ -80,16 +80,16 @@ jobs:
               
               if (prTitle.toLowerCase().includes('feature') || prTitle.toLowerCase().includes('add') || prTitle.toLowerCase().includes('new')) {
                 docsTitle = 'Documentation: New Feature - ' + prTitle;
-                docsContent = '# New Feature Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Made\n' + prBody + '\n\n## Implementation Details\n- PR Link: [' + prTitle + '](' + prUrl + ')\n- Repository: ' + context.repo.owner + '/' + context.repo.repo + '\n- Branch: ' + context.payload.pull_request.head.ref + '\n\n## Related Documentation\n- API documentation may need updates\n- User guides may need updates\n- Configuration examples may need updates\n\n## Next Steps\n1. Review the implementation details\n2. Update relevant documentation sections\n3. Add usage examples if applicable\n4. Update any configuration guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
+                docsContent = '# New Feature Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Made\n' + originalPrBody + '\n\n## Implementation Details\n- PR Link: [' + prTitle + '](' + prUrl + ')\n- Repository: ' + context.repo.owner + '/' + context.repo.repo + '\n- Branch: ' + context.payload.pull_request.head.ref + '\n\n## Related Documentation\n- API documentation may need updates\n- User guides may need updates\n- Configuration examples may need updates\n\n## Next Steps\n1. Review the implementation details\n2. Update relevant documentation sections\n3. Add usage examples if applicable\n4. Update any configuration guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
               } else if (prTitle.toLowerCase().includes('fix') || prTitle.toLowerCase().includes('bug') || prTitle.toLowerCase().includes('issue')) {
                 docsTitle = 'Documentation: Bug Fix - ' + prTitle;
-                docsContent = '# Bug Fix Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Issue Fixed\n' + prBody + '\n\n## Changes Made\n- Bug fix implementation\n- Updated error handling\n- Improved reliability\n\n## Impact\n- Users should be aware of the fix\n- No breaking changes expected\n- Improved stability\n\n## Related Documentation\n- Update troubleshooting guides if applicable\n- Update known issues section\n- Update changelog\n\n---\n*This documentation was automatically generated based on PR changes.*';
+                docsContent = '# Bug Fix Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Issue Fixed\n' + originalPrBody + '\n\n## Changes Made\n- Bug fix implementation\n- Updated error handling\n- Improved reliability\n\n## Impact\n- Users should be aware of the fix\n- No breaking changes expected\n- Improved stability\n\n## Related Documentation\n- Update troubleshooting guides if applicable\n- Update known issues section\n- Update changelog\n\n---\n*This documentation was automatically generated based on PR changes.*';
               } else if (prTitle.toLowerCase().includes('config') || prTitle.toLowerCase().includes('setting')) {
                 docsTitle = 'Documentation: Configuration Update - ' + prTitle;
-                docsContent = '# Configuration Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Configuration Changes\n' + prBody + '\n\n## New Configuration Options\n- Review and document new settings\n- Update configuration examples\n- Update deployment guides\n\n## Migration Guide\n- Document any breaking changes\n- Provide migration steps if needed\n- Update version compatibility notes\n\n---\n*This documentation was automatically generated based on PR changes.*';
+                docsContent = '# Configuration Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Configuration Changes\n' + originalPrBody + '\n\n## New Configuration Options\n- Review and document new settings\n- Update configuration examples\n- Update deployment guides\n\n## Migration Guide\n- Document any breaking changes\n- Provide migration steps if needed\n- Update version compatibility notes\n\n---\n*This documentation was automatically generated based on PR changes.*';
               } else {
                 docsTitle = 'Documentation: General Update - ' + prTitle;
-                docsContent = '# General Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Summary\n' + prBody + '\n\n## Documentation Impact\n- Review existing documentation\n- Update relevant sections\n- Add examples if needed\n\n## Areas to Review\n- API documentation\n- User guides\n- Configuration guides\n- Troubleshooting guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
+                docsContent = '# General Update Documentation\n\n## Overview\nThis documentation update is based on PR #' + prNumber + ': **' + prTitle + '**\n\n## Changes Summary\n' + originalPrBody + '\n\n## Documentation Impact\n- Review existing documentation\n- Update relevant sections\n- Add examples if needed\n\n## Areas to Review\n- API documentation\n- User guides\n- Configuration guides\n- Troubleshooting guides\n\n---\n*This documentation was automatically generated based on PR changes.*';
               }
               
               // Create a new branch name
@@ -139,7 +139,7 @@ jobs:
               
               // Create pull request in docs repo
               console.log('Creating pull request...');
-              const prBody = '## Documentation Update\n\nThis PR was automatically generated based on changes in [PR #' + context.issue.number + '](' + context.payload.pull_request.html_url + ') in the ' + context.repo.owner + '/' + context.repo.repo + ' repository.\n\n### Changes Made\n- Added documentation for the changes in the source PR\n- Generated based on PR title and description\n- Includes implementation details and next steps\n\n### Files Added\n- ' + fileName + ': Documentation update file\n\n### Next Steps\n1. Review the generated documentation\n2. Update any specific sections as needed\n3. Add more detailed examples if required\n4. Merge when ready\n\n---\n*This PR was automatically generated by the GitHub Actions workflow.*';
+              const docsPrBody = '## Documentation Update\n\nThis PR was automatically generated based on changes in [PR #' + context.issue.number + '](' + context.payload.pull_request.html_url + ') in the ' + context.repo.owner + '/' + context.repo.repo + ' repository.\n\n### Changes Made\n- Added documentation for the changes in the source PR\n- Generated based on PR title and description\n- Includes implementation details and next steps\n\n### Files Added\n- ' + fileName + ': Documentation update file\n\n### Next Steps\n1. Review the generated documentation\n2. Update any specific sections as needed\n3. Add more detailed examples if required\n4. Merge when ready\n\n---\n*This PR was automatically generated by the GitHub Actions workflow.*';
               
               const docsPR = await github.rest.pulls.create({
                 owner: docsOwner,
@@ -147,7 +147,7 @@ jobs:
                 title: docsTitle,
                 head: branchName,
                 base: baseBranch,
-                body: prBody
+                body: docsPrBody
               });
               
               console.log('PR created successfully:', docsPR.data.number);
