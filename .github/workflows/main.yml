@@ -76,8 +76,12 @@ jobs:
           echo "$FILE_STRUCTURE"
           
           # Store in outputs
-          echo "md_files=$MD_FILES" >> $GITHUB_OUTPUT
-          echo "file_structure=$FILE_STRUCTURE" >> $GITHUB_OUTPUT
+          echo "md_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$MD_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "file_structure<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILE_STRUCTURE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo "✅ Documentation repository cloned successfully"
       
@@ -160,8 +164,12 @@ jobs:
           echo "Content length: ${#MATCHED_CONTENT} characters"
           
           # Store in outputs
-          echo "matched_files=$MATCHED_FILES" >> $GITHUB_OUTPUT
-          echo "matched_content=$MATCHED_CONTENT" >> $GITHUB_OUTPUT
+          echo "matched_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$MATCHED_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "matched_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$MATCHED_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo "✅ File matching completed"
       
