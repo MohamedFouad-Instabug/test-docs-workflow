@@ -88,9 +88,9 @@ jobs:
           
           cd docs-repo
           
-          # Get the changed files from previous step
-          CHANGED_FILES="${{ steps.extract-pr-info.outputs.changed_files }}"
-          PR_TITLE="${{ steps.extract-pr-info.outputs.pr_title }}"
+          # Get the changed files from the analyze-changes step
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          PR_TITLE="${{ github.event.pull_request.title }}"
           
           echo "Changed files to process:"
           echo "$CHANGED_FILES"
@@ -173,12 +173,12 @@ jobs:
           echo "🧠 Analyzing with Gemini AI..."
           
           # Prepare the prompt for Gemini
-          PR_TITLE="${{ steps.extract-pr-info.outputs.pr_title }}"
-          PR_BODY="${{ steps.extract-pr-info.outputs.pr_body }}"
-          PR_NUMBER="${{ steps.extract-pr-info.outputs.pr_number }}"
-          PR_URL="${{ steps.extract-pr-info.outputs.pr_url }}"
-          CHANGED_FILES="${{ steps.extract-pr-info.outputs.changed_files }}"
-          DIFF_CONTENT="${{ steps.extract-pr-info.outputs.diff_content }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body || '' }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+          DIFF_CONTENT=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | head -c 10000)
           FILE_STRUCTURE="${{ steps.clone-docs.outputs.file_structure }}"
           MATCHED_FILES="${{ steps.match-files.outputs.matched_files }}"
           MATCHED_CONTENT="${{ steps.match-files.outputs.matched_content }}"
