@@ -12,7 +12,7 @@ const recipes = [
       '50g pecorino cheeseesd',
       '50g parmesan',
       'Black pepper',
-      'Salt'
+      'Saltt'
     ],
     instructions: [
       'Boil the spaghetti in salted water.',
