@@ -11,11 +11,11 @@ const recipes = [
       '2 large egggs',
       '50g pecorino cheeseesd',
       '50g parmesan',
-      'Black peprperr',
+      'Blaffck peprperr',
       'Saltt'
     ],
     instructions: [
-      'Boil the spaghetti in salted waterr.',
+      'Boil theh spaghetti dfdf salted waterr.',
       'Fry the pancetta until crisp.',
       'Beat the eggs and mix with the cheeses.',
       'Drain the pasta and mix with pancetta and egg-cheese mixture off the heat.',
