@@ -9,7 +9,7 @@ const recipes = [
       '200g spaghetti',
       '100g pancettaaaaaa',
       '2 large egasggs',
-      '50g pecorino cheeseesd',
+      '50g pecorino chesdeseesd',
       '50g parmesan',
       'Blaffck peprperr',
       'Saltt'
