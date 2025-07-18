@@ -1,0 +1,551 @@
+{
+  "name": "Automated Documentation Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "github-webhook-trigger",
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "github-webhook-trigger"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "event-type",
+              "leftValue": "={{ $json.headers['x-github-event'] }}",
+              "rightValue": "pull_request",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-pull-requests",
+      "name": "Filter PR Events",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "resource": "pullRequest",
+        "operation": "get",
+        "repository": "={{ $json.repository.full_name }}",
+        "pullRequestNumber": "={{ $json.number }}",
+        "options": {}
+      },
+      "id": "get-pr-details",
+      "name": "Get PR Details",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "githubApi": {
+          "id": "github-credentials",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "pullRequest",
+        "operation": "getFiles",
+        "repository": "={{ $json.repository.full_name }}",
+        "pullRequestNumber": "={{ $json.number }}",
+        "options": {}
+      },
+      "id": "get-changed-files",
+      "name": "Get Changed Files",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "credentials": {
+        "githubApi": {
+          "id": "github-credentials",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and format PR information\nconst prData = $input.first().json;\nconst changedFiles = $('Get Changed Files').first().json;\n\n// Format changed files list\nconst filesList = changedFiles.map(file => file.filename).join('\\n');\n\n// Prepare data for AI analysis\nconst analysisData = {\n  pr_title: prData.title,\n  pr_body: prData.body || '',\n  pr_number: prData.number,\n  pr_url: prData.html_url,\n  changed_files: filesList,\n  changed_files_count: changedFiles.length,\n  base_sha: prData.base.sha,\n  head_sha: prData.head.sha\n};\n\nreturn [{\n  json: analysisData\n}];"
+      },
+      "id": "prepare-pr-data",
+      "name": "Prepare PR Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "resource": "repository",
+        "operation": "getContent",
+        "repository": "MohamedFouad-Instabug/Docs",
+        "path": "",
+        "options": {}
+      },
+      "id": "get-docs-structure",
+      "name": "Get Docs Structure",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [1340, 300],
+      "credentials": {
+        "githubApi": {
+          "id": "docs-github-credentials",
+          "name": "Docs GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Match changed files to documentation\nconst prData = $('Prepare PR Data').first().json;\nconst docsStructure = $('Get Docs Structure').first().json;\n\n// Extract markdown files from docs structure\nconst markdownFiles = docsStructure.filter(item => \n  item.type === 'file' && item.name.endsWith('.md')\n).map(item => item.path);\n\n// Simple matching logic\nconst changedFiles = prData.changed_files.split('\\n');\nconst matches = [];\n\nchangedFiles.forEach(file => {\n  const filename = file.split('/').pop().replace(/\\.[^/.]+$/, '');\n  \n  // Direct filename match\n  const directMatch = markdownFiles.find(doc => \n    doc.includes(filename + '.md')\n  );\n  \n  if (directMatch) {\n    matches.push({\n      changed_file: file,\n      matched_doc: directMatch,\n      match_type: 'direct'\n    });\n  }\n});\n\nreturn [{\n  json: {\n    ...prData,\n    docs_files: markdownFiles,\n    matches: matches,\n    match_count: matches.length\n  }\n}];"
+      },
+      "id": "match-files",
+      "name": "Match Files to Docs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare data for Gemini AI analysis\nconst data = $('Match Files to Docs').first().json;\n\n// Create the prompt for Gemini AI\nconst prompt = `You are an expert documentation analyst. Analyze this pull request and determine if documentation updates are needed.
+
+PR Information:
+- Title: ${data.pr_title}
+- Number: ${data.pr_number}
+- URL: ${data.pr_url}
+- Body: ${data.pr_body}
+
+Changed Files:
+${data.changed_files}
+
+Documentation Files Available:
+${data.docs_files.join('\\n')}
+
+Matched Documentation:
+${data.matches.map(m => `- ${m.changed_file} -> ${m.matched_doc}`).join('\\n')}
+
+Please analyze this information and respond with a JSON object containing:
+{
+  \"needs_doc_update\": true/false,
+  \"reason\": \"explanation of why docs need updating or not\",
+  \"files_to_update\": [\"list of existing files to update\"],
+  \"files_to_create\": [\"list of new files to create\"],
+  \"suggested_content\": {\"filename.md\": \"content for this file\"},
+  \"update_summary\": \"brief summary of what documentation changes are needed\"
+}
+
+Focus on:
+- Architectural changes that affect system design
+- Business logic changes that affect user workflows
+- API changes that need documentation
+- Configuration changes that need guides
+- New features that need user documentation
+
+Be concise but thorough. If no documentation is needed, set needs_doc_update to false and explain why.`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    ...data\n  }\n}];"
+      },
+      "id": "prepare-ai-prompt",
+      "name": "Prepare AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "={{ $env.GEMINI_API_KEY }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "contents",
+              "value": "=[{\"parts\": [{\"text\": \"{{ $json.prompt }}\"}]}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "call-gemini-ai",
+      "name": "Call Gemini AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Gemini AI response\nconst response = $('Call Gemini AI').first().json;\nconst originalData = $('Prepare AI Prompt').first().json;\n\nlet analysisResult = {\n  needs_doc_update: false,\n  reason: 'No response from AI',\n  files_to_update: [],\n  files_to_create: [],\n  update_summary: 'No analysis available'\n};\n\ntry {\n  // Extract text from Gemini response\n  const aiText = response.candidates?.[0]?.content?.parts?.[0]?.text || '';\n  \n  if (aiText) {\n    // Try to extract JSON from the response\n    const jsonMatch = aiText.match(/\\{[\\s\\S]*\\}/);\n    \n    if (jsonMatch) {\n      const parsed = JSON.parse(jsonMatch[0]);\n      analysisResult = {\n        needs_doc_update: parsed.needs_doc_update || false,\n        reason: parsed.reason || 'Analysis completed',\n        files_to_update: parsed.files_to_update || [],\n        files_to_create: parsed.files_to_create || [],\n        suggested_content: parsed.suggested_content || {},\n        update_summary: parsed.update_summary || 'No summary provided'\n      };\n    }\n  }\n} catch (error) {\n  analysisResult.reason = `Error parsing AI response: ${error.message}`;\n}\n\nreturn [{\n  json: {\n    ...originalData,\n    ai_response: response,\n    analysis: analysisResult\n  }\n}];"
+      },
+      "id": "parse-ai-response",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-update",
+              "leftValue": "={{ $json.analysis.needs_doc_update }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-if-update-needed",
+      "name": "Check if Update Needed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "resource": "git",
+        "operation": "createRef",
+        "repository": "MohamedFouad-Instabug/Docs",
+        "ref": "refs/heads/docs-update-{{ $json.analysis.pr_number }}-{{ $now.format('YYYYMMDD-HHmmss') }}",
+        "sha": "main",
+        "options": {}
+      },
+      "id": "create-docs-branch",
+      "name": "Create Docs Branch",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [2660, 200],
+      "credentials": {
+        "githubApi": {
+          "id": "docs-github-credentials",
+          "name": "Docs GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate documentation content\nconst data = $('Parse AI Response').first().json;\nconst analysis = data.analysis;\n\n// Create documentation file content\nconst docContent = `# Documentation Update - PR #${data.pr_number}\n\n## Overview\nThis documentation update was generated by Gemini AI based on changes in [PR #${data.pr_number}](${data.pr_url}).\n\n## Analysis Results\n- **Reason for Update**: ${analysis.reason}\n- **Update Summary**: ${analysis.update_summary}\n\n## Files Identified for Update\n${analysis.files_to_update.length > 0 ? analysis.files_to_update.map(f => '- ' + f).join('\\n') : '- None specified'}\n\n## Files Identified for Creation\n${analysis.files_to_create.length > 0 ? analysis.files_to_create.map(f => '- ' + f).join('\\n') : '- None specified'}\n\n## Suggested Content\n${Object.entries(analysis.suggested_content).map(([file, content]) => `### ${file}\\n\\n${content}`).join('\\n\\n')}\n\n## Next Steps\n1. Review the AI-generated analysis\n2. Update the identified documentation files\n3. Create new documentation files as needed\n4. Ensure all changes are properly documented\n\n---\n*This documentation was automatically generated by the n8n workflow using Gemini AI.*`;\n\nreturn [{\n  json: {\n    ...data,\n    doc_content: docContent,\n    doc_filename: `updates/${new Date().toISOString().split('T')[0]}-pr-${data.pr_number}.md`\n  }\n}];"
+      },
+      "id": "generate-doc-content",
+      "name": "Generate Doc Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 200]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "create",
+        "repository": "MohamedFouad-Instabug/Docs",
+        "path": "={{ $json.doc_filename }}",
+        "message": "Add AI-generated documentation update based on PR analysis",
+        "content": "={{ $json.doc_content }}",
+        "branch": "={{ $json.analysis.pr_number }}-{{ $now.format('YYYYMMDD-HHmmss') }}",
+        "options": {}
+      },
+      "id": "create-doc-file",
+      "name": "Create Doc File",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [3100, 200],
+      "credentials": {
+        "githubApi": {
+          "id": "docs-github-credentials",
+          "name": "Docs GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "pullRequest",
+        "operation": "create",
+        "repository": "MohamedFouad-Instabug/Docs",
+        "title": "Documentation Update - PR #{{ $json.pr_number }}: {{ $json.pr_title }}",
+        "body": "## AI-Generated Documentation Update\n\nThis PR was automatically generated by Gemini AI based on changes in [PR #{{ $json.pr_number }}]({{ $json.pr_url }}) in the {{ $json.repository }} repository.\n\n### AI Analysis Results\n- **Reason**: {{ $json.analysis.reason }}\n- **Summary**: {{ $json.analysis.update_summary }}\n\n### Files Changed\n- {{ $json.doc_filename }}: AI-generated documentation update\n\n### What the AI Found\nThe AI analyzed the PR changes and determined that documentation updates are needed. The analysis included:\n- PR title and description\n- Changed files and their diffs\n- Existing documentation structure\n- Matched documentation files\n\n### Next Steps\n1. Review the AI-generated analysis\n2. Update the identified documentation files\n3. Create new documentation files as needed\n4. Ensure all changes are properly documented\n\n---\n*This PR was automatically generated by the n8n workflow using Gemini AI.*",
+        "head": "docs-update-{{ $json.pr_number }}-{{ $now.format('YYYYMMDD-HHmmss') }}",
+        "base": "main",
+        "options": {}
+      },
+      "id": "create-docs-pr",
+      "name": "Create Docs PR",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [3320, 200],
+      "credentials": {
+        "githubApi": {
+          "id": "docs-github-credentials",
+          "name": "Docs GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "issue",
+        "operation": "createComment",
+        "repository": "={{ $json.repository }}",
+        "issueNumber": "={{ $json.pr_number }}",
+        "body": "## AI-Generated Documentation Update Created ✅\n\nI have analyzed your PR changes using Gemini AI and created a documentation update in the Docs repository.\n\n### Documentation PR Created\n- Repository: [MohamedFouad-Instabug/Docs]({{ $json.docs_pr_url }})\n- PR Number: #{{ $json.docs_pr_number }}\n- Title: Documentation Update - PR #{{ $json.pr_number }}: {{ $json.pr_title }}\n\n### AI Analysis Results\n- **Reason**: {{ $json.analysis.reason }}\n- **Summary**: {{ $json.analysis.update_summary }}\n\n### What the AI Analyzed\n- PR title and description\n- Changed files and their diffs\n- Existing documentation structure\n- Matched documentation files\n\n### Files Identified\n- **To Update**: {{ $json.analysis.files_to_update.join(', ') || 'None specified' }}\n- **To Create**: {{ $json.analysis.files_to_create.join(', ') || 'None specified' }}\n\n### Next Steps\n1. Review the AI-generated analysis in the Docs PR\n2. Update the identified documentation files\n3. Create new documentation files as needed\n4. Merge the documentation PR when ready\n\n---\n*This comment was automatically generated by the n8n workflow using Gemini AI.*",
+        "options": {}
+      },
+      "id": "comment-on-pr",
+      "name": "Comment on PR",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [3540, 200],
+      "credentials": {
+        "githubApi": {
+          "id": "github-credentials",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "issue",
+        "operation": "createComment",
+        "repository": "={{ $json.repository }}",
+        "issueNumber": "={{ $json.pr_number }}",
+        "body": "## Documentation Analysis Complete ✅\n\nI have analyzed your PR changes using Gemini AI and determined that **no documentation updates are needed**.\n\n### AI Analysis Results\n- **Reason**: {{ $json.analysis.reason }}\n\n### What the AI Analyzed\n- PR title and description\n- Changed files and their diffs\n- Existing documentation structure\n- Matched documentation files\n\n### Conclusion\nThe AI determined that the changes in this PR do not require updates to the documentation repository. This could be because:\n- The changes are internal/technical and don't affect user-facing documentation\n- The changes are already well-documented\n- The changes don't introduce new features or APIs that need documentation\n\n---\n*This analysis was automatically generated by the n8n workflow using Gemini AI.*",
+        "options": {}
+      },
+      "id": "comment-no-update",
+      "name": "Comment No Update",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [2660, 400],
+      "credentials": {
+        "githubApi": {
+          "id": "github-credentials",
+          "name": "GitHub API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [
+        [
+          {
+            "node": "Filter PR Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter PR Events": {
+      "main": [
+        [
+          {
+            "node": "Get PR Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get PR Details": {
+      "main": [
+        [
+          {
+            "node": "Get Changed Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Changed Files": {
+      "main": [
+        [
+          {
+            "node": "Prepare PR Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PR Data": {
+      "main": [
+        [
+          {
+            "node": "Get Docs Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Docs Structure": {
+      "main": [
+        [
+          {
+            "node": "Match Files to Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Files to Docs": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini AI": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Check if Update Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Update Needed": {
+      "main": [
+        [
+          {
+            "node": "Create Docs Branch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Comment No Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Docs Branch": {
+      "main": [
+        [
+          {
+            "node": "Generate Doc Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Doc Content": {
+      "main": [
+        [
+          {
+            "node": "Create Doc File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Doc File": {
+      "main": [
+        [
+          {
+            "node": "Create Docs PR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Docs PR": {
+      "main": [
+        [
+          {
+            "node": "Comment on PR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-13T12:00:00.000Z",
+  "versionId": "1"
+} 
